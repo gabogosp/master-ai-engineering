@@ -120,6 +120,11 @@ La interfaz conversacional (`streamlit_app.py`) proporciona:
 ```
 estimador-cag/
 ├── streamlit_app.py        # Interfaz web de chat con streaming (Fase 2)
+├── tests/                  # Suite de pruebas unitarias automatizadas
+│   ├── conftest.py         # Configuración y fixtures de pytest
+│   ├── test_api.py         # Tests de endpoints FastAPI y códigos de error
+│   ├── test_config_and_cag.py # Tests de settings y construcción de prompt CAG
+│   └── test_stream_and_ui.py  # Tests de Streamlit con AppTest y streaming
 ├── app/
 │   ├── main.py             # Aplicación FastAPI y endpoint /health
 │   ├── config.py           # Configuración desde .env (Pydantic Settings)
@@ -131,7 +136,22 @@ estimador-cag/
 │       └── examples.py     # Estimaciones previas inyectadas en el prompt
 ```
 
+## Tests Unitarios
+
+El proyecto cuenta con una suite completa de pruebas unitarias con `pytest` y mocks (sin consumo de API ni necesidad de claves reales):
+
+```bash
+uv run pytest -v
+```
+
+Cubre:
+- Validación de esquemas y endpoints (`/health`, `/api/v1/estimate`).
+- Mapeo de errores HTTP (`422`, `500`, `502`, `503`).
+- Inyección estática de contexto CAG en el prompt.
+- Simulación de la aplicación de Streamlit (`AppTest`), generación token a token y captura de métricas.
+
 ## Cómo mejorar las estimaciones
 
 El "conocimiento" del sistema son los ejemplos de `app/context/examples.py`. Para mejorar la calidad, añade más ejemplos a la lista `ESTIMATION_EXAMPLES`, con el mismo formato que los existentes. El prompt los incluye automáticamente. Cada ejemplo nuevo aumenta los tokens de entrada de cada petición, y por tanto su coste.
+
 
