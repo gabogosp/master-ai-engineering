@@ -43,6 +43,18 @@ El archivo `.env` contiene secretos y está en el `.gitignore`. No lo subas al r
 
 ## Ejecución
 
+### Opción 1: Interfaz Web Conversacional (Streamlit)
+
+Arranca la interfaz gráfica de chat con soporte de streaming y observabilidad CAG:
+
+```bash
+uv run streamlit run streamlit_app.py
+```
+
+La aplicación se abrirá automáticamente en http://localhost:8501.
+
+### Opción 2: Backend API (FastAPI)
+
 Arranca el servidor desde la raíz del proyecto, porque el `.env` se lee desde la carpeta actual:
 
 ```bash
@@ -93,20 +105,33 @@ Códigos de error:
 
 El detalle de cada error queda en el log del servidor y no se envía al cliente.
 
+## Interfaz Web (Streamlit - Fase 2)
+
+La interfaz conversacional (`streamlit_app.py`) proporciona:
+- **Chat interactivo**: Entrada directa de transcripciones con retención del historial de conversación durante la sesión (`st.session_state`).
+- **Streaming token a token**: Visualización en tiempo real conforme el modelo genera la estimación (`st.write_stream`).
+- **Observabilidad CAG en panel lateral (`st.sidebar`)**:
+  - Consulta en modo lectura del System Prompt activo y reglas de estimación.
+  - Catálogo de estimaciones de ejemplo inyectadas estáticamente.
+  - Telemetría de la última llamada: modelo utilizado, tokens de entrada, tokens de salida y tiempo de respuesta en segundos.
+
 ## Estructura
 
 ```
-app/
-├── main.py                 # Aplicación FastAPI y endpoint /health
-├── config.py               # Configuración desde .env (Pydantic Settings)
-├── routers/
-│   └── estimations.py      # Endpoint POST /api/v1/estimate y sus schemas
-├── services/
-│   └── llm_service.py      # Construcción del prompt y llamadas a OpenAI/Anthropic
-└── context/
-    └── examples.py         # Estimaciones previas inyectadas en el prompt
+estimador-cag/
+├── streamlit_app.py        # Interfaz web de chat con streaming (Fase 2)
+├── app/
+│   ├── main.py             # Aplicación FastAPI y endpoint /health
+│   ├── config.py           # Configuración desde .env (Pydantic Settings)
+│   ├── routers/
+│   │   └── estimations.py  # Endpoint POST /api/v1/estimate y sus schemas
+│   ├── services/
+│   │   └── llm_service.py  # Construcción del prompt y llamadas a OpenAI/Anthropic
+│   └── context/
+│       └── examples.py     # Estimaciones previas inyectadas en el prompt
 ```
 
 ## Cómo mejorar las estimaciones
 
 El "conocimiento" del sistema son los ejemplos de `app/context/examples.py`. Para mejorar la calidad, añade más ejemplos a la lista `ESTIMATION_EXAMPLES`, con el mismo formato que los existentes. El prompt los incluye automáticamente. Cada ejemplo nuevo aumenta los tokens de entrada de cada petición, y por tanto su coste.
+
