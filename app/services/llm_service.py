@@ -7,29 +7,10 @@ import structlog
 from litellm import Router
 
 from app.config import settings
-from app.context.examples import ESTIMATION_EXAMPLES
 from app.services.cache import ExactMatchCache, build_cache_key
 
 MAX_OUTPUT_TOKENS = 4096
 TEMPERATURE = 0.3
-
-SYSTEM_INSTRUCTIONS = """You are an expert software estimator. Your job is to produce project \
-estimates from the transcript of a meeting with a client.
-
-Rules:
-- Use the previous estimation examples as a reference for format, level of detail and hourly rate \
-(50 EUR/h).
-- Follow exactly the same structure as the examples: title, task breakdown with hours, total, \
-recommended team, duration, cost, and assumptions and risks.
-- Base the estimate only on what the transcript says. If important information is missing, state \
-it in the assumptions and risks section instead of inventing it.
-- Compare the upper end of your estimated duration with the deadline the client mentioned. If it is \
-longer than the deadline, add a bullet to the assumptions and risks section that starts with \
-"Riesgo de plazo:" and states the client's deadline, your estimated duration, and what scope could \
-be cut or which extra people would be needed to meet it. If the estimate fits within the deadline, \
-do not add that bullet. If the client gave no deadline, do not invent one.
-- Always write the estimation in Spanish, using the same section headings as the examples. \
-Return only the estimation, with no additional text."""
 
 # Nombres lógicos de los dos grupos del Router. El código de negocio solo
 # conoce PRIMARY_GROUP; el Router decide qué modelo físico atiende cada uno.
@@ -79,17 +60,6 @@ class LLMResult:
     provider: str
     input_tokens: int
     output_tokens: int
-
-
-def build_system_prompt() -> str:
-    examples = "\n\n".join(
-        f'<example number="{i}">\n'
-        f"<meeting_summary>\n{ex['meeting_summary']}\n</meeting_summary>\n"
-        f"<estimation>\n{ex['estimation']}\n</estimation>\n"
-        f"</example>"
-        for i, ex in enumerate(ESTIMATION_EXAMPLES, start=1)
-    )
-    return f"{SYSTEM_INSTRUCTIONS}\n\n## Previous estimation examples\n\n{examples}"
 
 
 def _api_key_for(provider: str) -> str | None:
@@ -147,18 +117,21 @@ def _get_router() -> Router:
     return _router
 
 
-def _cache_key_for(system_prompt: str, transcription: str) -> str:
+def _cache_key_for(system: str, user: str) -> str:
     return build_cache_key(
-        system=system_prompt,
-        user=transcription,
+        system=system,
+        user=user,
         model=settings.llm_model,
         temperature=TEMPERATURE,
     )
 
 
-async def generate_estimation(transcription: str) -> LLMResult:
-    system_prompt = build_system_prompt()
-    cache_key = _cache_key_for(system_prompt, transcription)
+async def generate_estimation(system: str, user: str) -> LLMResult:
+    """Llama al modelo con `system` y `user` ya renderizados (ver
+    app.prompts.loader.render_estimation_prompt). Este módulo no sabe nada
+    de proyectos, CAG ni templates: solo dos strings y una llamada al LLM.
+    """
+    cache_key = _cache_key_for(system, user)
 
     call_logger = logger.bind(
         requested_provider=settings.llm_provider, requested_model=settings.llm_model
@@ -177,8 +150,8 @@ async def generate_estimation(transcription: str) -> LLMResult:
         response = await router.acompletion(
             model=PRIMARY_GROUP,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": transcription},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
             temperature=TEMPERATURE,
             max_tokens=MAX_OUTPUT_TOKENS,
@@ -228,21 +201,21 @@ async def generate_estimation(transcription: str) -> LLMResult:
 
 
 async def stream_estimation(
-    transcription: str,
+    system: str,
+    user: str,
     on_complete: Callable[[LLMResult], None] | None = None,
 ) -> AsyncIterator[str]:
     """Yieldea la estimación token a token a través del wrapper (mismo cache
-    y fallback que `generate_estimation`).
+    y fallback que `generate_estimation`), recibiendo `system`/`user` ya
+    renderizados.
 
     Esta función no sabe nada de Streamlit ni de SSE: solo produce texto. Si
     el llamador necesita los metadatos finales (modelo, proveedor, tokens),
     pasa `on_complete`, que se invoca una única vez al terminar el stream con
-    el `LLMResult` completo. Así Streamlit puede llenar su `session_state` y
-    un futuro endpoint SSE puede armar su evento `meta`, sin que este módulo
-    conozca a ninguno de los dos.
+    el `LLMResult` completo. Así cada consumidor (Streamlit, un endpoint SSE)
+    arma su propia UI sin que este módulo conozca a ninguno de los dos.
     """
-    system_prompt = build_system_prompt()
-    cache_key = _cache_key_for(system_prompt, transcription)
+    cache_key = _cache_key_for(system, user)
     call_logger = logger.bind(
         requested_provider=settings.llm_provider, requested_model=settings.llm_model
     )
@@ -270,8 +243,8 @@ async def stream_estimation(
         stream = await router.acompletion(
             model=PRIMARY_GROUP,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": transcription},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
             temperature=TEMPERATURE,
             max_tokens=MAX_OUTPUT_TOKENS,

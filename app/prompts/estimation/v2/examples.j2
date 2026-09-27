@@ -1,0 +1,101 @@
+## Previous estimation examples
+
+<example number="1">
+<project_type>internal_tool</project_type>
+<description>
+An HR team of about 50 employees wants to replace their spreadsheet-based
+vacation tracker with a small internal web tool. Employees request time off,
+their manager approves or rejects it, and both sides get an email
+notification. HR needs a read-only report of remaining balance per employee.
+No design exists yet.
+</description>
+<estimation>
+## Estimación: Gestor de Vacaciones Interno
+
+### Desglose de tareas:
+1. Diseño UI/UX (formularios y vista de reporte): 16 horas
+2. Backend API (solicitudes, aprobaciones, balances): 40 horas
+3. Autenticación y roles (empleado / manager / RRHH): 16 horas
+4. Notificaciones por email: 8 horas
+5. Testing y QA: 12 horas
+
+**Total estimado: 92 horas**
+**Equipo recomendado: 1 desarrollador full-stack**
+**Duración estimada: 3-4 semanas**
+**Coste estimado: 92 h x 50 €/h = 4.600 €**
+
+### Supuestos y riesgos:
+- Se asume una única empresa/tenant, sin soporte multi-organización.
+- El envío de emails usa un proveedor SMTP ya existente del cliente.
+- Riesgo: si el cálculo de balance debe migrar datos históricos de las
+  hojas de cálculo actuales, se necesitan horas adicionales de migración.
+</estimation>
+</example>
+
+<example number="2">
+<project_type>data_pipeline</project_type>
+<description>
+A retail client with a point-of-sale system wants a nightly pipeline that
+extracts sales transactions, cleans and aggregates them by store and
+product category, and loads the result into their data warehouse for a
+BI dashboard the client already owns. Volume is around 50,000 transactions
+per day across 12 stores. Plazo deseado: 6 semanas.
+</description>
+<estimation>
+## Estimación: Pipeline Nocturno de Ventas
+
+### Desglose de tareas:
+1. Extracción desde el sistema POS (API o export programado): 24 horas
+2. Transformación y agregación (por tienda y categoría): 32 horas
+3. Carga incremental al data warehouse: 20 horas
+4. Orquestación y programación (job nocturno, reintentos): 16 horas
+5. Monitoreo de fallos y alertas básicas: 10 horas
+6. Testing con datos reales de muestra: 14 horas
+
+**Total estimado: 116 horas**
+**Equipo recomendado: 1 ingeniero de datos + 0.5 desarrollador backend (part-time)**
+**Duración estimada: 5-6 semanas**
+**Coste estimado: 116 h x 50 €/h = 5.800 €**
+
+### Supuestos y riesgos:
+- El sistema POS expone los datos vía API o export a archivo; si requiere
+  integración a medida con hardware propietario, el alcance crece.
+- El esquema del data warehouse ya existe y no requiere rediseño.
+- Riesgo: la calidad de los datos de origen (duplicados, transacciones
+  anuladas) no se conoce de antemano y puede añadir horas de limpieza.
+</estimation>
+</example>
+
+<example number="3">
+<project_type>mobile_app</project_type>
+<description>
+A chain of parking garages wants a mobile app (iOS and Android) where
+drivers can see real-time available spots per garage, reserve one, and
+pay in-app. They also need a lightweight admin panel for garage staff to
+mark spots as out of service. No existing design. Plazo deseado: 10 semanas.
+</description>
+<estimation>
+## Estimación: App Móvil de Estacionamientos
+
+### Desglose de tareas:
+1. Diseño UI/UX (app + panel admin): 36 horas
+2. App móvil (disponibilidad en tiempo real, reserva): 90 horas
+3. Integración de pagos in-app: 30 horas
+4. Panel admin web para el personal: 28 horas
+5. Backend API y sincronización de disponibilidad: 40 horas
+6. Testing y QA (app + panel): 26 horas
+
+**Total estimado: 250 horas**
+**Equipo recomendado: 2 desarrolladores móviles + 1 desarrollador backend + 1 diseñador UX (part-time)**
+**Duración estimada: 9-10 semanas**
+**Coste estimado: 250 h x 50 €/h = 12.500 €**
+
+### Supuestos y riesgos:
+- Se asume un único proveedor de pagos, ya contratado por el cliente.
+- La disponibilidad de spots depende de sensores o reportes manuales del
+  personal; no se incluye la instalación de hardware de sensores.
+- Riesgo de plazo: el rango superior de la estimación (10 semanas) coincide
+  justo con el plazo del cliente; cualquier cambio de alcance durante el
+  desarrollo probablemente lo exceda.
+</estimation>
+</example>

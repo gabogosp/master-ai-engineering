@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock
+
 import httpx
 import openai
 from fastapi.testclient import TestClient
@@ -8,6 +9,13 @@ from app.services.llm_service import (
     LLMConfigurationError,
     LLMResult,
 )
+
+VALID_PAYLOAD = {
+    "description": "El cliente necesita una plataforma para reservar turnos online con recordatorios por email.",
+    "project_type": "web_saas",
+    "detail_level": "medium",
+    "output_format": "phases_table",
+}
 
 
 def test_health_endpoint(client: TestClient):
@@ -22,17 +30,26 @@ def test_health_endpoint(client: TestClient):
 
 
 def test_estimate_validation_too_short(client: TestClient):
-    """La API debe rechazar con 422 transcripciones de menos de 20 caracteres."""
+    """La API debe rechazar con 422 una descripción de menos de 20 caracteres."""
     response = client.post(
         "/api/v1/estimate",
-        json={"transcription": "Demasiado corta"},
+        json={**VALID_PAYLOAD, "description": "Demasiado corta"},
     )
     assert response.status_code == 422
 
 
 def test_estimate_validation_missing_field(client: TestClient):
-    """La API debe rechazar con 422 peticiones sin el campo transcription."""
+    """La API debe rechazar con 422 peticiones sin los campos requeridos."""
     response = client.post("/api/v1/estimate", json={})
+    assert response.status_code == 422
+
+
+def test_estimate_validation_invalid_enum(client: TestClient):
+    """La API debe rechazar con 422 un valor de enum que no existe."""
+    response = client.post(
+        "/api/v1/estimate",
+        json={**VALID_PAYLOAD, "project_type": "quantum_computer"},
+    )
     assert response.status_code == 422
 
 
@@ -49,19 +66,48 @@ def test_estimate_success(client: TestClient, monkeypatch):
     mock_generate = AsyncMock(return_value=mock_result)
     monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
 
-    payload = {
-        "transcription": "El cliente necesita una plataforma para reservar turnos online con recordatorios por email."
-    }
-    response = client.post("/api/v1/estimate", json=payload)
+    response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
 
     assert response.status_code == 200
     data = response.json()
-    assert data["estimation"] == mock_result.estimation
+    assert data["text"] == mock_result.estimation
+    assert data["prompt_version"] == "v1"
     assert data["model"] == mock_result.model
     assert data["provider"] == mock_result.provider
     assert data["input_tokens"] == 500
     assert data["output_tokens"] == 120
     assert "created_at" in data
+
+    # El endpoint le pasa a generate_estimation el system/user ya renderizados,
+    # no el request crudo.
+    (system, user), _ = mock_generate.call_args
+    assert "phases_table" in system
+    assert VALID_PAYLOAD["description"] in user
+
+
+def test_estimate_with_prompt_version_query_param(client: TestClient, monkeypatch):
+    """?prompt_version=v2 debe usarse para renderizar y devolverse en la respuesta."""
+    mock_result = LLMResult(
+        estimation="## Estimación v2\nTotal: 80 horas",
+        model="gpt-4o-mini-mock",
+        provider="openai",
+        input_tokens=300,
+        output_tokens=90,
+    )
+    mock_generate = AsyncMock(return_value=mock_result)
+    monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
+
+    response = client.post("/api/v1/estimate?prompt_version=v2", json=VALID_PAYLOAD)
+
+    assert response.status_code == 200
+    assert response.json()["prompt_version"] == "v2"
+
+
+def test_estimate_with_unknown_prompt_version(client: TestClient):
+    """Una versión de prompt inexistente debe responder 422, no un 500."""
+    response = client.post("/api/v1/estimate?prompt_version=v99", json=VALID_PAYLOAD)
+    assert response.status_code == 422
+    assert "v99" in response.json()["detail"]
 
 
 def test_estimate_incomplete_error(client: TestClient, monkeypatch):
@@ -69,10 +115,7 @@ def test_estimate_incomplete_error(client: TestClient, monkeypatch):
     mock_generate = AsyncMock(side_effect=IncompleteEstimationError("Respuesta cortada"))
     monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
 
-    response = client.post(
-        "/api/v1/estimate",
-        json={"transcription": "Transcripción válida con más de veinte caracteres para la prueba."},
-    )
+    response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 502
     assert "incompleta" in response.json()["detail"].lower()
 
@@ -82,10 +125,7 @@ def test_estimate_configuration_error(client: TestClient, monkeypatch):
     mock_generate = AsyncMock(side_effect=LLMConfigurationError("API key inválida"))
     monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
 
-    response = client.post(
-        "/api/v1/estimate",
-        json={"transcription": "Transcripción válida con más de veinte caracteres para la prueba."},
-    )
+    response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 500
     assert "mal configurado" in response.json()["detail"].lower()
 
@@ -101,10 +141,7 @@ def test_estimate_rate_limit_error(client: TestClient, monkeypatch):
     )
     monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
 
-    response = client.post(
-        "/api/v1/estimate",
-        json={"transcription": "Transcripción válida con más de veinte caracteres para la prueba."},
-    )
+    response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 503
     assert "no puede atender la petición" in response.json()["detail"].lower()
 
@@ -119,9 +156,6 @@ def test_estimate_provider_api_error(client: TestClient, monkeypatch):
     )
     monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
 
-    response = client.post(
-        "/api/v1/estimate",
-        json={"transcription": "Transcripción válida con más de veinte caracteres para la prueba."},
-    )
+    response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 502
     assert "no se pudo obtener respuesta" in response.json()["detail"].lower()

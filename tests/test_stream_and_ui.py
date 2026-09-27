@@ -1,72 +1,84 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 from streamlit.testing.v1 import AppTest
 
 APP_PATH = str(Path(__file__).parent.parent / "streamlit_app.py")
 
+FAKE_SSE_BODY = (
+    b'data: "## Estimaci\\u00f3n de prueba\\n"\n\n'
+    b'data: "Total: 42 horas"\n\n'
+    b"event: meta\n"
+    b'data: {"prompt_version": "v1", "model": "gpt-4o-mini-mock", '
+    b'"provider": "openai", "input_tokens": 111, "output_tokens": 22}\n\n'
+)
 
-async def fake_stream_estimation(transcription: str, on_complete=None):
-    """Reemplaza app.services.llm_service.stream_estimation: yieldea texto en
-    trozos y al final invoca on_complete, igual que haría el wrapper real."""
-    from app.services.llm_service import LLMResult
 
-    for piece in ["## Estimación: App Móvil\n", "Total: 120 horas"]:
-        yield piece
+def _fake_handler(request: httpx.Request) -> httpx.Response:
+    assert request.url.path == "/api/v1/estimate/stream"
+    return httpx.Response(200, content=FAKE_SSE_BODY, headers={"content-type": "text/event-stream"})
 
-    if on_complete:
-        on_complete(
-            LLMResult(
-                estimation="## Estimación: App Móvil\nTotal: 120 horas",
-                model="gpt-4o-mini-mock",
-                provider="openai",
-                input_tokens=320,
-                output_tokens=95,
-            )
-        )
+
+_RealClient = httpx.Client
+
+
+def _mock_httpx_client(*args, **kwargs):
+    """Reemplaza httpx.Client por uno con un MockTransport: intercepta la
+    llamada real por red y devuelve el mismo wire format SSE que produce
+    nuestro endpoint /estimate/stream, sin necesitar un servidor corriendo.
+
+    Usa `_RealClient` (guardada antes del patch) para no recursar contra el
+    propio mock.
+    """
+    return _RealClient(transport=httpx.MockTransport(_fake_handler))
 
 
 def test_streamlit_initial_render():
-    """Verifica que la app de Streamlit renderice correctamente sus elementos iniciales."""
+    """Verifica que el formulario (ya no el chat) renderice sus elementos iniciales."""
     at = AppTest.from_file(APP_PATH).run()
 
     assert not at.exception
-    assert at.title[0].value == "📋 Estimador de Proyectos (CAG)"
-    assert len(at.chat_input) == 1
-    assert at.chat_input[0].placeholder == "Pega aquí la transcripción de la reunión..."
+    assert at.title[0].value == "📋 Estimador de Proyectos"
+    assert len(at.text_area) == 1
+    assert len(at.selectbox) == 4  # tipo, detalle, formato, versión de prompt
     assert len(at.sidebar) > 0
 
 
-def test_streamlit_chat_streaming_interaction():
-    """Simula una interacción de chat completa con streaming a través del wrapper
-    (app.services.llm_service.stream_estimation) y verifica sesión y métricas."""
-    with patch("app.services.llm_service.stream_estimation", fake_stream_estimation):
+def test_streamlit_form_submission_streams_result():
+    """Simula completar el formulario y enviarlo: verifica que el resultado
+    llegue vía el parser SSE propio y que las métricas (incluido
+    prompt_version) queden en session_state."""
+    with patch("httpx.Client", side_effect=_mock_httpx_client):
         at = AppTest.from_file(APP_PATH).run()
 
-        # Simulamos que el usuario envía una transcripción
-        at.chat_input[0].set_value(
-            "El cliente necesita una app móvil para iOS y Android de gestión de pedidos."
-        ).run()
+        at.text_area[0].set_value(
+            "El cliente necesita un sistema de tickets de soporte con estados y comentarios internos."
+        )
+        at.button[0].click().run()
 
-        # Verificamos que no haya excepciones
         assert not at.exception
 
-        # Verificamos que se hayan renderizado 2 mensajes (usuario y asistente)
-        assert len(at.chat_message) == 2
+        full_text = "\n".join(md.value for md in at.markdown)
+        assert "42 horas" in full_text
 
-        # Verificamos que la sesión mantenga los mensajes
-        messages = at.session_state["messages"]
-        assert len(messages) == 2
-        assert messages[0]["role"] == "user"
-        assert messages[1]["role"] == "assistant"
-        assert "120 horas" in messages[1]["content"]
-
-        # Verificamos que las métricas se hayan capturado en el session_state,
-        # incluido el proveedor (nuevo desde que el wrapper resuelve fallback)
         metrics = at.session_state["last_metrics"]
-        assert metrics is not None
         assert metrics["model"] == "gpt-4o-mini-mock"
         assert metrics["provider"] == "openai"
-        assert metrics["input_tokens"] == 320
-        assert metrics["output_tokens"] == 95
+        assert metrics["prompt_version"] == "v1"
+        assert metrics["input_tokens"] == 111
+        assert metrics["output_tokens"] == 22
         assert "elapsed_time" in metrics
+
+
+def test_streamlit_form_rejects_short_description():
+    """El formulario debe validar la longitud mínima antes de llamar al backend."""
+    with patch("httpx.Client", side_effect=_mock_httpx_client) as mock_client:
+        at = AppTest.from_file(APP_PATH).run()
+
+        at.text_area[0].set_value("Muy corto")
+        at.button[0].click().run()
+
+        assert not at.exception
+        assert any("al menos 20 caracteres" in e.value for e in at.error)
+        mock_client.assert_not_called()
