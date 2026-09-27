@@ -1,8 +1,29 @@
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
 from streamlit.testing.v1 import AppTest
 
 APP_PATH = str(Path(__file__).parent.parent / "streamlit_app.py")
+
+
+async def fake_stream_estimation(transcription: str, on_complete=None):
+    """Reemplaza app.services.llm_service.stream_estimation: yieldea texto en
+    trozos y al final invoca on_complete, igual que haría el wrapper real."""
+    from app.services.llm_service import LLMResult
+
+    for piece in ["## Estimación: App Móvil\n", "Total: 120 horas"]:
+        yield piece
+
+    if on_complete:
+        on_complete(
+            LLMResult(
+                estimation="## Estimación: App Móvil\nTotal: 120 horas",
+                model="gpt-4o-mini-mock",
+                provider="openai",
+                input_tokens=320,
+                output_tokens=95,
+            )
+        )
 
 
 def test_streamlit_initial_render():
@@ -17,23 +38,9 @@ def test_streamlit_initial_render():
 
 
 def test_streamlit_chat_streaming_interaction():
-    """Simula una interacción de chat completa con streaming de OpenAI y verifica sesión y métricas."""
-    # Mock de los eventos que emite OpenAI durante el streaming
-    mock_event_1 = MagicMock()
-    mock_event_1.type = "response.output_text.delta"
-    mock_event_1.delta = "## Estimación: App Móvil\nTotal: 120 horas"
-
-    mock_event_2 = MagicMock()
-    mock_event_2.type = "response.completed"
-    mock_event_2.response.model = "gpt-4o-mini-2024-07-18"
-    mock_event_2.response.usage.input_tokens = 320
-    mock_event_2.response.usage.output_tokens = 95
-
-    with patch("openai.OpenAI") as mock_openai_cls:
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.responses.create.return_value = [mock_event_1, mock_event_2]
-
+    """Simula una interacción de chat completa con streaming a través del wrapper
+    (app.services.llm_service.stream_estimation) y verifica sesión y métricas."""
+    with patch("app.services.llm_service.stream_estimation", fake_stream_estimation):
         at = AppTest.from_file(APP_PATH).run()
 
         # Simulamos que el usuario envía una transcripción
@@ -54,10 +61,12 @@ def test_streamlit_chat_streaming_interaction():
         assert messages[1]["role"] == "assistant"
         assert "120 horas" in messages[1]["content"]
 
-        # Verificamos que las métricas se hayan capturado en el session_state
+        # Verificamos que las métricas se hayan capturado en el session_state,
+        # incluido el proveedor (nuevo desde que el wrapper resuelve fallback)
         metrics = at.session_state["last_metrics"]
         assert metrics is not None
-        assert metrics["model"] == "gpt-4o-mini-2024-07-18"
+        assert metrics["model"] == "gpt-4o-mini-mock"
+        assert metrics["provider"] == "openai"
         assert metrics["input_tokens"] == 320
         assert metrics["output_tokens"] == 95
         assert "elapsed_time" in metrics
