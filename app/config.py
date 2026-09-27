@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     app_env: str = "development"
     log_level: str = "DEBUG"
+    redis_url: str = "redis://localhost:6379/0"
+    cache_ttl_seconds: int = 86400
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

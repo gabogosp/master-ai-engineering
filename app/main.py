@@ -3,12 +3,14 @@ import logging
 from fastapi import FastAPI
 
 from app.config import settings
+from app.logging_config import configure_logging
 from app.routers import estimations
 
-# Solo nuestro código usa LOG_LEVEL. Las librerías se quedan en WARNING porque,
-# en DEBUG, pueden imprimir mucho, incluido el contenido de las peticiones.
+# Las librerías de terceros (uvicorn, httpx...) siguen en logging estándar,
+# limitadas a WARNING porque en DEBUG pueden imprimir mucho, incluido el
+# contenido de las peticiones. Nuestro propio código usa structlog.
 logging.basicConfig(level=logging.WARNING)
-logging.getLogger("app").setLevel(settings.log_level.upper())
+configure_logging(settings.app_env, settings.log_level)
 
 app = FastAPI(
     title="Estimador CAG",

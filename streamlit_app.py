@@ -1,45 +1,36 @@
-import streamlit as st
-import openai
 import time
-from app.config import settings
-from app.services.llm_service import build_system_prompt, TEMPERATURE, MAX_OUTPUT_TOKENS, SYSTEM_INSTRUCTIONS, ESTIMATION_EXAMPLES
+
+import streamlit as st
+
+from app.services.llm_service import ESTIMATION_EXAMPLES, SYSTEM_INSTRUCTIONS, stream_estimation
 
 
 st.set_page_config(page_title="Estimador CAG", page_icon="📋")
 st.title("📋 Estimador de Proyectos (CAG)")
 
-def stream_estimation(transcription: str):
-    client = openai.OpenAI(api_key=settings.openai_api_key)
-    start_time = time.perf_counter()  # Empezamos a cronometrar
-    # Llamamos a OpenAI con stream=True
-    response_stream = client.responses.create(
-        model=settings.llm_model,
-        instructions=build_system_prompt(),  # Reutiliza el prompt con los ejemplos CAG
-        input=transcription,
-        temperature=TEMPERATURE,
-        max_output_tokens=MAX_OUTPUT_TOKENS,
-        stream=True,
-    )
+def stream_for_ui(transcription: str):
+    """Delega el streaming al wrapper (proveedor + fallback + cache ya
+    resueltos ahí). Esta función solo conecta el resultado final con el
+    estado de sesión de Streamlit."""
+    start_time = time.perf_counter()
 
-    # Cada vez que llega un fragmento de texto, hacemos yield
-    for event in response_stream:
-        if event.type == "response.output_text.delta":
-            yield event.delta
-        elif event.type == "response.completed":  # Evento final con estadísticas
-            elapsed = time.perf_counter() - start_time
-            st.session_state.last_metrics = {
-                "model": event.response.model,
-                "input_tokens": event.response.usage.input_tokens if event.response.usage else 0,
-                "output_tokens": event.response.usage.output_tokens if event.response.usage else 0,
-                "elapsed_time": round(elapsed, 2),
-            }
+    def _on_complete(result):
+        st.session_state.last_metrics = {
+            "model": result.model,
+            "provider": result.provider,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "elapsed_time": round(time.perf_counter() - start_time, 2),
+        }
+
+    return stream_estimation(transcription, on_complete=_on_complete)
 
 def render_metrics(placeholder, metrics):
     if not metrics:
         placeholder.info("Aún no se ha generado ninguna estimación.")
         return
     with placeholder.container():
-        st.markdown(f"**Modelo:** `{metrics['model']}`")
+        st.markdown(f"**Modelo:** `{metrics['model']}` · **Proveedor:** `{metrics['provider']}`")
         col1, col2 = st.columns(2)
         col1.metric("Tokens Entrada", metrics["input_tokens"])
         col2.metric("Tokens Salida", metrics["output_tokens"])
@@ -86,8 +77,8 @@ if prompt := st.chat_input("Pega aquí la transcripción de la reunión..."):
 
     # Respuesta provisional (simulada) para probar el flujo
     with st.chat_message("assistant"):
-        # st.write_stream consume el generador token a token y al finalizar devuelve el string completo
-        full_response = st.write_stream(stream_estimation(prompt))
+        # st.write_stream consume el generador async token a token y al finalizar devuelve el string completo
+        full_response = st.write_stream(stream_for_ui(prompt))
         # Actualizamos la barra lateral inmediatamente con los datos recién calculados
     render_metrics(metrics_placeholder, st.session_state.get("last_metrics"))
 
