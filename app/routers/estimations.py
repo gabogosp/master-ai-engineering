@@ -1,11 +1,13 @@
 from collections.abc import AsyncIterable
 from datetime import datetime, timezone
+from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from pydantic import BaseModel, Field
 
+from app.prompts.loader import render_estimation_prompt
+from app.schemas import EstimationRequest, EstimationResponse
 from app.services.llm_service import (
     CONFIGURATION_ERRORS,
     PROVIDER_ERRORS,
@@ -20,29 +22,25 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["estimations"])
 
-
-class EstimationRequest(BaseModel):
-    transcription: str = Field(
-        min_length=20,
-        max_length=100_000,
-        description="Texto de la transcripción de la reunión con el cliente",
-    )
-
-
-class EstimationResponse(BaseModel):
-    estimation: str
-    model: str
-    provider: str
-    input_tokens: int
-    output_tokens: int
-    created_at: datetime
+DEFAULT_PROMPT_VERSION = "v1"
+PromptVersionParam = Annotated[
+    str, Query(description="Versión de prompt a usar, ej. 'v1' o 'v2'.")
+]
 
 
 @router.post("/estimate", response_model=EstimationResponse)
-async def estimate(request: EstimationRequest) -> EstimationResponse:
+async def estimate(
+    request: EstimationRequest,
+    prompt_version: PromptVersionParam = DEFAULT_PROMPT_VERSION,
+) -> EstimationResponse:
+    try:
+        system, user = render_estimation_prompt(request, version=prompt_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
     # El detalle de cada fallo va al log. Al cliente solo le damos un mensaje genérico.
     try:
-        result = await generate_estimation(request.transcription)
+        result = await generate_estimation(system, user)
     except IncompleteEstimationError as exc:
         logger.warning("estimation_incomplete", error=str(exc))
         raise HTTPException(
@@ -72,7 +70,8 @@ async def estimate(request: EstimationRequest) -> EstimationResponse:
         )
 
     return EstimationResponse(
-        estimation=result.estimation,
+        text=result.estimation,
+        prompt_version=prompt_version,
         model=result.model,
         provider=result.provider,
         input_tokens=result.input_tokens,
@@ -82,17 +81,29 @@ async def estimate(request: EstimationRequest) -> EstimationResponse:
 
 
 @router.post("/estimate/stream", response_class=EventSourceResponse)
-async def estimate_stream(request: EstimationRequest) -> AsyncIterable[ServerSentEvent]:
-    """Igual que /estimate pero via Server-Sent Events, para clientes que no
-    sean Streamlit (que ya consume `stream_estimation` directamente).
+async def estimate_stream(
+    request: EstimationRequest,
+    prompt_version: PromptVersionParam = DEFAULT_PROMPT_VERSION,
+) -> AsyncIterable[ServerSentEvent]:
+    """Igual que /estimate pero via Server-Sent Events, para clientes que
+    consuman streaming (incluido el formulario de Streamlit, que le pega a
+    este endpoint por HTTP en vez de importar el wrapper directo).
 
     Una vez que el primer chunk sale, la respuesta ya está comprometida a
     200 + text/event-stream: un fallo a mitad de camino no puede convertirse
-    en un 500/502/503 HTTP. Por eso los errores se comunican como un evento
-    `error` dentro del stream, con el mismo mensaje genérico que usa /estimate;
-    el detalle completo sigue yendo solo al log.
+    en un 500/502/503 HTTP. Por eso los errores (incluida una `prompt_version`
+    inexistente) se comunican como un evento `error` dentro del stream, con
+    el mismo mensaje genérico que usa /estimate; el detalle completo sigue
+    yendo solo al log.
     """
-    metadata: dict = {}
+    try:
+        system, user = render_estimation_prompt(request, version=prompt_version)
+    except ValueError as exc:
+        logger.warning("invalid_prompt_version", prompt_version=prompt_version, error=str(exc))
+        yield ServerSentEvent(event="error", data=f"Versión de prompt inválida: {prompt_version}")
+        return
+
+    metadata: dict = {"prompt_version": prompt_version}
 
     def _on_complete(result: LLMResult) -> None:
         metadata.update(
@@ -103,7 +114,7 @@ async def estimate_stream(request: EstimationRequest) -> AsyncIterable[ServerSen
         )
 
     try:
-        async for chunk in stream_estimation(request.transcription, on_complete=_on_complete):
+        async for chunk in stream_estimation(system, user, on_complete=_on_complete):
             yield ServerSentEvent(data=chunk)
     except IncompleteEstimationError as exc:
         logger.warning("estimation_incomplete", error=str(exc), streaming=True)
