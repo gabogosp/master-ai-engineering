@@ -1,4 +1,3 @@
-import json
 import time
 
 import httpx
@@ -15,62 +14,22 @@ st.set_page_config(page_title="Estimador CAG", page_icon="📋")
 st.title("📋 Estimador de Proyectos")
 
 
-def _iter_sse_events(response: httpx.Response):
-    """Parser mínimo del wire format de Server-Sent Events: bloques de
-    líneas `field: value` separados por una línea en blanco. Solo nos
-    interesan `event` y `data` (nuestro servidor no usa `id`/`retry`)."""
-    event_type = None
-    data_lines: list[str] = []
-    for line in response.iter_lines():
-        if line == "":
-            if data_lines:
-                yield event_type or "message", "\n".join(data_lines)
-            event_type, data_lines = None, []
-            continue
-        if line.startswith("data:"):
-            data_lines.append(line[len("data:") :].lstrip())
-        elif line.startswith("event:"):
-            event_type = line[len("event:") :].strip()
-    if data_lines:
-        yield event_type or "message", "\n".join(data_lines)
+def call_estimate(payload: dict, prompt_version: str) -> dict:
+    """POST bloqueante a /api/v1/estimate: la respuesta llega completa de una
+    sola vez (texto libre, sin streaming). Es el contrato que pide esta
+    entrega — /api/v1/estimate/stream (SSE) sigue existiendo en el backend
+    para otros clientes, pero este formulario ya no lo usa."""
+    url = f"{settings.backend_url}/api/v1/estimate"
+    with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
+        response = client.post(url, json=payload, params={"prompt_version": prompt_version})
 
+    if response.status_code != 200:
+        detail = response.text
+        if "application/json" in response.headers.get("content-type", ""):
+            detail = response.json().get("detail", detail)
+        raise RuntimeError(f"Error {response.status_code}: {detail}")
 
-def stream_for_ui(payload: dict, prompt_version: str):
-    """POST real a /api/v1/estimate/stream. Devuelve (generador_de_texto,
-    metrics_holder): metrics_holder se llena al terminar el stream (evento
-    `meta`, o `error` si algo salió mal), así que hay que agotar el
-    generador (st.write_stream ya lo hace) antes de leerlo."""
-    start_time = time.perf_counter()
-    metrics_holder: dict = {}
-
-    def _gen():
-        url = f"{settings.backend_url}/api/v1/estimate/stream"
-        params = {"prompt_version": prompt_version}
-        with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
-            with client.stream("POST", url, json=payload, params=params) as response:
-                if response.status_code != 200:
-                    response.read()
-                    detail = response.text
-                    if "application/json" in response.headers.get("content-type", ""):
-                        detail = response.json().get("detail", detail)
-                    metrics_holder["error"] = f"Error {response.status_code}: {detail}"
-                    yield f"⚠️ {metrics_holder['error']}"
-                    return
-
-                for event_type, raw_data in _iter_sse_events(response):
-                    data = json.loads(raw_data)
-                    if event_type == "message":
-                        yield data
-                    elif event_type == "meta":
-                        metrics_holder.update(data)
-                        metrics_holder["elapsed_time"] = round(
-                            time.perf_counter() - start_time, 2
-                        )
-                    elif event_type == "error":
-                        metrics_holder["error"] = data
-                        yield f"\n\n⚠️ {data}"
-
-    return _gen(), metrics_holder
+    return response.json()
 
 
 def render_metrics(placeholder, metrics: dict | None):
@@ -180,9 +139,23 @@ if submitted:
         )
 
         st.subheader("Resultado")
-        generator, metrics_holder = stream_for_ui(payload, prompt_version)
-        with st.spinner("Generando estimación..."):
-            st.write_stream(generator)
+        start_time = time.perf_counter()
+        try:
+            with st.spinner("Generando estimación..."):
+                result = call_estimate(payload, prompt_version)
+        except RuntimeError as exc:
+            st.error(str(exc))
+            metrics_holder = {"error": str(exc)}
+        else:
+            st.markdown(result["text"])
+            metrics_holder = {
+                "model": result["model"],
+                "provider": result["provider"],
+                "prompt_version": result["prompt_version"],
+                "input_tokens": result["input_tokens"],
+                "output_tokens": result["output_tokens"],
+                "elapsed_time": round(time.perf_counter() - start_time, 2),
+            }
 
         st.session_state.last_metrics = metrics_holder
         st.session_state.last_system_prompt = system_preview

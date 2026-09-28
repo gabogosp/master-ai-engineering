@@ -6,18 +6,20 @@ from streamlit.testing.v1 import AppTest
 
 APP_PATH = str(Path(__file__).parent.parent / "streamlit_app.py")
 
-FAKE_SSE_BODY = (
-    b'data: "## Estimaci\\u00f3n de prueba\\n"\n\n'
-    b'data: "Total: 42 horas"\n\n'
-    b"event: meta\n"
-    b'data: {"prompt_version": "v1", "model": "gpt-4o-mini-mock", '
-    b'"provider": "openai", "input_tokens": 111, "output_tokens": 22}\n\n'
-)
+FAKE_RESPONSE_BODY = {
+    "text": "## Estimación de prueba\nTotal: 42 horas",
+    "prompt_version": "v1",
+    "model": "gpt-4o-mini-mock",
+    "provider": "openai",
+    "input_tokens": 111,
+    "output_tokens": 22,
+    "created_at": "2026-09-27T00:00:00Z",
+}
 
 
 def _fake_handler(request: httpx.Request) -> httpx.Response:
-    assert request.url.path == "/api/v1/estimate/stream"
-    return httpx.Response(200, content=FAKE_SSE_BODY, headers={"content-type": "text/event-stream"})
+    assert request.url.path == "/api/v1/estimate"
+    return httpx.Response(200, json=FAKE_RESPONSE_BODY)
 
 
 _RealClient = httpx.Client
@@ -25,8 +27,8 @@ _RealClient = httpx.Client
 
 def _mock_httpx_client(*args, **kwargs):
     """Reemplaza httpx.Client por uno con un MockTransport: intercepta la
-    llamada real por red y devuelve el mismo wire format SSE que produce
-    nuestro endpoint /estimate/stream, sin necesitar un servidor corriendo.
+    llamada real por red y devuelve la misma respuesta JSON bloqueante que
+    produce nuestro endpoint /estimate, sin necesitar un servidor corriendo.
 
     Usa `_RealClient` (guardada antes del patch) para no recursar contra el
     propio mock.
@@ -45,10 +47,9 @@ def test_streamlit_initial_render():
     assert len(at.sidebar) > 0
 
 
-def test_streamlit_form_submission_streams_result():
-    """Simula completar el formulario y enviarlo: verifica que el resultado
-    llegue vía el parser SSE propio y que las métricas (incluido
-    prompt_version) queden en session_state."""
+def test_streamlit_form_submission_shows_full_response():
+    """Simula completar el formulario y enviarlo: la respuesta llega de una
+    sola vez (bloqueante, texto libre) y las métricas quedan en session_state."""
     with patch("httpx.Client", side_effect=_mock_httpx_client):
         at = AppTest.from_file(APP_PATH).run()
 

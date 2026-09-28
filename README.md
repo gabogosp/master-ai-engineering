@@ -6,7 +6,7 @@ Arquitectura:
 
 ```
 Streamlit (formulario tipado)
-        │  HTTP (POST /api/v1/estimate/stream)
+        │  HTTP (POST /api/v1/estimate, bloqueante)
         ▼
 FastAPI ── Jinja2 (prompts versionados) ── LiteLLM Router (fallback openai↔anthropic)
         │
@@ -136,7 +136,9 @@ El detalle de cada error queda en el log del servidor (structlog) y no se envía
 
 ### `POST /api/v1/estimate/stream`
 
-Igual que `/estimate` pero via Server-Sent Events: un evento `data` por chunk de texto generado, y un evento final `event: meta` con los metadatos (`model`, `provider`, `input_tokens`, `output_tokens`, `prompt_version`). Si algo falla, se emite un evento `event: error` con un mensaje genérico (la respuesta ya está comprometida a `200 text/event-stream`, no puede convertirse en un código HTTP distinto). Es lo que consume el cliente Streamlit.
+Igual que `/estimate` pero via Server-Sent Events: un evento `data` por chunk de texto generado, y un evento final `event: meta` con los metadatos (`model`, `provider`, `input_tokens`, `output_tokens`, `prompt_version`). Si algo falla, se emite un evento `event: error` con un mensaje genérico (la respuesta ya está comprometida a `200 text/event-stream`, no puede convertirse en un código HTTP distinto).
+
+**El cliente Streamlit no usa este endpoint.** El contrato de esta entrega es deliberadamente bloqueante y de texto libre (`EstimationResponse.text`) — es el punto de partida sobre el que se trabaja streaming + salida estructurada en el directo de sesión 04. Este endpoint queda disponible para otros clientes que sí quieran consumir streaming.
 
 ## Prompts versionados
 
@@ -165,14 +167,14 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 `streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python):
 
 - **Formulario tipado**: descripción + `project_type`/`detail_level`/`output_format`/`prompt_version`, y una sección opcional para proyectos de referencia.
-- **Streaming preservado**: consume `POST /api/v1/estimate/stream` con un parser propio del wire format de SSE, alimentando `st.write_stream`.
+- **Llamada bloqueante**: hace `POST /api/v1/estimate` y muestra un spinner hasta que llega la respuesta completa — sin streaming, a propósito (ver nota en `/estimate/stream` arriba).
 - **Observabilidad en la sidebar**: modelo, proveedor y tokens de la última llamada, y el system prompt exacto que se usó (renderizado localmente con el mismo loader, solo para inspección — la llamada real la resuelve el servidor).
 
 ## Estructura
 
 ```
 master-ai-engineering/
-├── streamlit_app.py             # Cliente web (formulario + streaming SSE)
+├── streamlit_app.py             # Cliente web (formulario, POST bloqueante a /estimate)
 ├── docker-compose.yml           # Redis para el cache exact-match
 ├── tests/
 │   ├── conftest.py
@@ -209,7 +211,7 @@ Todos corren con mocks (sin API keys reales ni Redis corriendo):
 - Endpoints y mapeo de errores HTTP (`422`, `500`, `502`, `503`), incluida la versión de prompt.
 - Clave de cache exact-match (determinismo, sensibilidad a cada parámetro).
 - Templates de prompt (`v1` y `v2`): contenido literal de la descripción, bloques condicionales mutuamente excluyentes, `reference_projects`, versión inexistente.
-- Streamlit (`AppTest`) con `httpx.MockTransport`: formulario, streaming, validación.
+- Streamlit (`AppTest`) con `httpx.MockTransport`: formulario, respuesta bloqueante, validación.
 
 ## Cómo mejorar las estimaciones
 
