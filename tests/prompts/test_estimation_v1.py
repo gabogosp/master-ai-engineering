@@ -1,4 +1,5 @@
 import pytest
+from jinja2 import Environment, StrictUndefined, UndefinedError
 
 from app.prompts.loader import render_estimation_prompt
 from app.schemas import DetailLevel, EstimationRequest, OutputFormat, ProjectType, ReferenceProject
@@ -76,6 +77,20 @@ def test_reference_projects_are_rendered_when_present():
     assert "Reference projects" in user_with
     assert "CRM Inmobiliario" in user_with
     assert "<actual_hours>180</actual_hours>" in user_with
+
+
+def test_strict_undefined_raises_on_missing_variable():
+    """Prueba aislada de la configuración de Jinja2, sin pasar por el
+    loader: si algún día alguien cambia StrictUndefined por el Undefined
+    por defecto (que renderiza silenciosamente como string vacío), este
+    test tiene que empezar a fallar. Los templates reales de v1/v2 no
+    tienen typos hoy, así que un test que solo los renderice no detectaría
+    esa regresión — por eso se prueba la semántica directamente."""
+    env = Environment(undefined=StrictUndefined)
+    template = env.from_string("Hola {{ nombre_que_no_se_pasa }}")
+
+    with pytest.raises(UndefinedError):
+        template.render(nombre="Gabriel")
 
 
 def test_unknown_version_raises():

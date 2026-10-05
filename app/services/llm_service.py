@@ -118,11 +118,16 @@ def _get_router() -> Router:
 
 
 def _cache_key_for(system: str, user: str) -> str:
+    # Todo parámetro que pueda afectar la respuesta va acá, aunque hoy sea
+    # una constante de módulo (MAX_OUTPUT_TOKENS, TEMPERATURE): si alguna vez
+    # se vuelven configurables por request, dos respuestas con distinto
+    # max_tokens no deben colisionar en la misma entrada de caché.
     return build_cache_key(
         system=system,
         user=user,
         model=settings.llm_model,
         temperature=TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
 
 
