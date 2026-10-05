@@ -131,17 +131,20 @@ def _cache_key_for(system: str, user: str) -> str:
     )
 
 
-async def generate_estimation(system: str, user: str) -> LLMResult:
-    """Llama al modelo con `system` y `user` ya renderizados (ver
-    app.prompts.loader.render_estimation_prompt). Este módulo no sabe nada
-    de proyectos, CAG ni templates: solo dos strings y una llamada al LLM.
-    """
-    cache_key = _cache_key_for(system, user)
-
-    call_logger = logger.bind(
-        requested_provider=settings.llm_provider, requested_model=settings.llm_model
+def _cache_key_for_messages(messages: list[dict]) -> str:
+    return build_cache_key(
+        messages=messages,
+        model=settings.llm_model,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
 
+
+async def _call_llm(messages: list[dict], cache_key: str, call_logger) -> LLMResult:
+    """Lógica compartida (cache, Router, logging) entre una llamada de un
+    solo turno (`generate_estimation`) y una multi-turno
+    (`generate_conversation_turn`): a esta altura ambas son lo mismo, un
+    array `messages` y una clave de cache."""
     cached = await _cache.get(cache_key)
     if cached is not None:
         call_logger.info("llm_cache_hit")
@@ -154,10 +157,7 @@ async def generate_estimation(system: str, user: str) -> LLMResult:
     try:
         response = await router.acompletion(
             model=PRIMARY_GROUP,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=messages,
             temperature=TEMPERATURE,
             max_tokens=MAX_OUTPUT_TOKENS,
         )
@@ -203,6 +203,41 @@ async def generate_estimation(system: str, user: str) -> LLMResult:
     )
     await _cache.set(cache_key, asdict(result))
     return result
+
+
+async def generate_estimation(system: str, user: str) -> LLMResult:
+    """Llama al modelo con `system` y `user` ya renderizados (ver
+    app.prompts.loader.render_estimation_prompt). Este módulo no sabe nada
+    de proyectos, CAG ni templates: solo dos strings y una llamada al LLM.
+    """
+    cache_key = _cache_key_for(system, user)
+    call_logger = logger.bind(
+        requested_provider=settings.llm_provider, requested_model=settings.llm_model
+    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    return await _call_llm(messages, cache_key, call_logger)
+
+
+async def generate_conversation_turn(messages: list[dict]) -> LLMResult:
+    """Para el flujo multi-turno (POST /sessions/{id}/estimate): `messages`
+    ya viene armado por ConversationHistory.to_messages_list() -- system +
+    ventana deslizante de turnos previos + el turno nuevo.
+
+    La clave de cache se arma sobre el array completo: dos conversaciones
+    con exactamente el mismo historial cachean igual; cualquier turno
+    nuevo (historial distinto al crecer) es, por definición, un cache
+    miss -- coherente con que cada turno agrega información real.
+    """
+    cache_key = _cache_key_for_messages(messages)
+    call_logger = logger.bind(
+        requested_provider=settings.llm_provider,
+        requested_model=settings.llm_model,
+        conversation_turns=(len(messages) - 1) // 2,
+    )
+    return await _call_llm(messages, cache_key, call_logger)
 
 
 async def stream_estimation(

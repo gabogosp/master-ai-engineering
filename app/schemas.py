@@ -40,6 +40,10 @@ class EstimationRequest(BaseModel):
     reference_projects: list[ReferenceProject] | None = None
 
 
+class SessionCreatedResponse(BaseModel):
+    session_id: str
+
+
 class EstimationResponse(BaseModel):
     text: str
     prompt_version: str
@@ -48,3 +52,7 @@ class EstimationResponse(BaseModel):
     input_tokens: int
     output_tokens: int
     created_at: datetime
+    # Solo poblados por el endpoint de sesión (POST /sessions/{id}/estimate);
+    # el endpoint de formulario de un solo turno los deja en None.
+    project_metadata: dict | None = None
+    history_turns: int | None = None

@@ -16,6 +16,24 @@ Rules:
   estimate fits or no deadline was given, do not add that bullet.
 - Always write the estimation in Spanish. Return only the estimation, with
   no additional text.
+- If a <project_metadata> block below has known facts (project name, team
+  size, technologies, agreed scope), stay consistent with them instead of
+  re-deriving or contradicting them turn after turn.
+
+<project_metadata>
+{% if project_metadata and project_metadata.project_name %}
+Project name: {{ project_metadata.project_name }}
+{% endif %}
+{% if project_metadata and project_metadata.assumed_team_size %}
+Assumed team size: {{ project_metadata.assumed_team_size }}
+{% endif %}
+{% if project_metadata and project_metadata.mentioned_technologies %}
+Mentioned technologies: {{ project_metadata.mentioned_technologies | join(", ") }}
+{% endif %}
+{% if project_metadata and project_metadata.agreed_scope %}
+Agreed scope: {{ project_metadata.agreed_scope }}
+{% endif %}
+</project_metadata>
 
 {% if output_format == "phases_table" %}
 Output format (phases_table): present the task breakdown as a Markdown

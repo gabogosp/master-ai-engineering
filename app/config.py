@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     cache_ttl_seconds: int = 86400
     backend_url: str = "http://localhost:8000"
+    max_conversation_turns: int = 6
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

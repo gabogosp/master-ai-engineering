@@ -1,6 +1,6 @@
 # Estimador CAG
 
-Servicio de IA (FastAPI) que recibe una descripción estructurada de un proyecto y devuelve una estimación de software generada por un LLM, más un cliente web (Streamlit) con formulario tipado.
+Servicio de IA (FastAPI) que genera estimaciones de software con un LLM, más un cliente web (Streamlit). Soporta dos modos: un formulario tipado de un solo turno, y una conversación multi-turno con memoria de sesión y adjuntos (PDF/Word).
 
 Arquitectura:
 
@@ -47,6 +47,7 @@ Las variables se leen del archivo `.env`. Cualquier variable que falte usa su va
 | `REDIS_URL` | Conexión al cache exact-match | `redis://localhost:6379/0` |
 | `CACHE_TTL_SECONDS` | TTL de las entradas en cache | `86400` (24h) |
 | `BACKEND_URL` | URL del servicio IA que consume el cliente Streamlit | `http://localhost:8000` |
+| `MAX_CONVERSATION_TURNS` | Ventana deslizante del historial conversacional (ver sección de sesiones) | `6` |
 
 Con **una sola** API key configurada, el servicio funciona sin fallback. Con las dos, si el proveedor primario falla (rate limit, error 5xx, timeout), el [Router de LiteLLM](https://docs.litellm.ai/) reintenta automáticamente con el otro proveedor.
 
@@ -164,23 +165,95 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 
 ## Interfaz Web (Streamlit)
 
-`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python):
+`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python). Tiene dos pestañas:
 
-- **Formulario tipado**: descripción + `project_type`/`detail_level`/`output_format`/`prompt_version`, y una sección opcional para proyectos de referencia.
-- **Llamada bloqueante**: hace `POST /api/v1/estimate` y muestra un spinner hasta que llega la respuesta completa — sin streaming, a propósito (ver nota en `/estimate/stream` arriba).
-- **Observabilidad en la sidebar**: modelo, proveedor y tokens de la última llamada, y el system prompt exacto que se usó (renderizado localmente con el mismo loader, solo para inspección — la llamada real la resuelve el servidor).
+**⚡ Estimación rápida** (sesión 04):
+- Formulario tipado: descripción + `project_type`/`detail_level`/`output_format`/`prompt_version`, y una sección opcional para proyectos de referencia.
+- Llamada bloqueante: hace `POST /api/v1/estimate` y muestra un spinner hasta que llega la respuesta completa — sin streaming, a propósito (ver nota en `/estimate/stream` arriba).
+- Observabilidad en la sidebar: modelo, proveedor y tokens de la última llamada, y el system prompt exacto que se usó (renderizado localmente con el mismo loader, solo para inspección — la llamada real la resuelve el servidor).
+
+**💬 Conversación** (sesión 05):
+- Crea una sesión (`POST /sessions`) al cargar la página.
+- Chat (`st.chat_input`) + subida de adjuntos (`st.file_uploader`, PDF/Word).
+- Panel expandible con el `project_metadata` actual y cuántos turnos hay en la ventana deslizante — útil para ver en vivo la separación entre memoria y historial.
+- Botón "Nueva conversación" que crea una sesión nueva y resetea el estado local.
+
+## Conversación multi-turno con memoria (sesión 05)
+
+Hasta acá, el estimador era transaccional: una petición, una respuesta, sin estado. Esta entrega agrega un flujo **conversacional** con memoria de sesión — el contexto del proyecto se preserva entre turnos sin reenviar todo el historial crudo cada vez.
+
+### `POST /api/v1/sessions`
+
+Crea una sesión vacía y devuelve `{"session_id": "<uuid4>"}`. Las sesiones viven en un diccionario en memoria del proceso — sin base de datos ni Redis. Se pierden al reiniciar el servicio; es una volatilidad aceptada a propósito en esta fase (ver docstring de `SessionStore` en `app/sessions.py`).
+
+### `POST /api/v1/sessions/{session_id}/estimate`
+
+`multipart/form-data` con dos campos:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `transcript` | string | Lo nuevo que aporta este turno (no todo el historial — eso lo gestiona el servidor) |
+| `attachments` | archivos (opcional) | PDFs o `.docx` con especificaciones adicionales |
+
+```bash
+SID=$(curl -s -X POST http://localhost:8000/api/v1/sessions | python3 -c "import sys,json;print(json.load(sys.stdin)['session_id'])")
+
+curl -X POST "http://localhost:8000/api/v1/sessions/$SID/estimate" \
+  -F "transcript=El cliente es una clínica veterinaria y quiere un sistema de turnos."
+```
+
+La respuesta es el mismo `EstimationResponse` del endpoint de formulario, con dos campos extra que solo este endpoint completa:
+
+```json
+{
+  "text": "## Estimación ...",
+  "prompt_version": "v1",
+  "model": "gpt-4o-mini-2024-07-18",
+  "provider": "openai",
+  "input_tokens": 1420,
+  "output_tokens": 240,
+  "created_at": "2026-10-05T23:00:00Z",
+  "project_metadata": {
+    "project_name": "Sistema de Turnos VetCare",
+    "assumed_team_size": null,
+    "mentioned_technologies": [],
+    "agreed_scope": "Sistema de turnos online con recordatorios por email"
+  },
+  "history_turns": 1
+}
+```
+
+### Decisión: adjuntos — Camino B (extracción local)
+
+Se eligió **extracción local** (`pypdf` para PDF, `python-docx` para Word) en vez de subir el archivo directo a la Files API de un proveedor (Camino A). Razón: el wrapper de LLM (`llm_service.py`) es agnóstico de proveedor desde el Bloque A — el Router de LiteLLM hace fallback automático entre OpenAI y Anthropic. Atar un adjunto a la Files API de un proveedor específico rompería esa propiedad justo para las peticiones con adjuntos. Extraer el texto localmente (`app/attachments.py`) mantiene el fallback intacto en todos los casos, y de paso deja el terreno preparado para chunking de RAG (módulo 3). El texto de cada adjunto se concatena al transcript con un separador `--- attachment: <filename> ---`.
+
+### Decisión: extracción de `project_metadata` — LLM extractor
+
+Después de cada turno, una **segunda llamada al LLM** (prompt propio en `app/prompts/metadata_extraction/v1/`) extrae en JSON qué se aprendió del turno, y se fusiona sobre lo que ya se sabía (`ProjectMetadata.merge`, en `app/sessions.py`). Se eligió esto en vez de una heurística con regex porque el texto es libre y en español, con redacción variable turno a turno — una regex sería frágil. El costo extra (una llamada más por turno, con un modelo barato) se consideró aceptable. Si el LLM devuelve algo que no parsea como JSON, se degrada a **no actualizar nada** en vez de romper la petición — la extracción de metadata es una mejora de la experiencia conversacional, no algo que deba poder tumbar una estimación que sí se generó bien.
+
+### `project_metadata` separado del historial
+
+`project_metadata` (hechos conocidos: nombre del proyecto, equipo asumido, tecnologías, alcance) vive **aparte** del historial de mensajes (`ConversationHistory`). El historial es "qué se dijo"; el metadata es "qué sabemos". Se inyecta en el `<project_metadata>` del `system.j2` **regenerado en cada turno** — nunca queda desactualizado, y no ocupa espacio en la ventana deslizante del historial.
+
+![Conversación de tres turnos con el panel de project_metadata visible, mostrando cómo la estimación evoluciona (100 → 128 horas) a medida que se acumula información](docs/streamlit-conversacion.png)
+
+### Ventana deslizante del historial
+
+`ConversationHistory` guarda pares user+assistant y, al armar `to_messages_list()`, conserva solo los últimos `MAX_CONVERSATION_TURNS` (6 por defecto, configurable). El system prompt no vive en el historial — se regenera fresco cada vez a partir del `project_metadata` actual, así que siempre viaja aunque los turnos más viejos se descarten.
 
 ## Estructura
 
 ```
 master-ai-engineering/
-├── streamlit_app.py             # Cliente web (formulario, POST bloqueante a /estimate)
+├── streamlit_app.py             # Cliente web (2 pestañas: formulario y conversación)
 ├── docker-compose.yml           # Redis para el cache exact-match
 ├── tests/
 │   ├── conftest.py
 │   ├── test_api.py              # Endpoints, códigos de error, prompt_version
 │   ├── test_cache.py            # Clave de cache exact-match
 │   ├── test_config.py           # Settings
+│   ├── test_schemas.py          # Validación Pydantic de los schemas
+│   ├── test_sessions_integration.py  # Sesiones end-to-end (httpx.AsyncClient)
 │   ├── test_stream_and_ui.py    # Streamlit vía AppTest (mock de httpx)
 │   └── prompts/
 │       ├── test_estimation_v1.py
@@ -189,14 +262,19 @@ master-ai-engineering/
 │   ├── main.py                  # App FastAPI + logging + endpoint /health
 │   ├── config.py                # Configuración desde .env
 │   ├── schemas.py                # EstimationRequest/Response, enums, ReferenceProject
+│   ├── sessions.py                # ProjectMetadata, ConversationHistory, SessionStore
+│   ├── attachments.py             # Extracción local de texto (pypdf / python-docx)
 │   ├── logging_config.py         # structlog (consola en dev, JSON en prod)
 │   ├── prompts/
-│   │   ├── loader.py              # render_estimation_prompt
-│   │   └── estimation/{v1,v2}/    # Templates Jinja2
+│   │   ├── loader.py              # render_estimation_prompt, render_session_prompt
+│   │   ├── estimation/{v1,v2}/    # Templates Jinja2 de estimación
+│   │   └── metadata_extraction/v1/  # Templates Jinja2 de extracción de metadata
 │   ├── routers/
-│   │   └── estimations.py         # POST /estimate y /estimate/stream
+│   │   ├── estimations.py         # POST /estimate y /estimate/stream
+│   │   └── sessions.py            # POST /sessions y /sessions/{id}/estimate
 │   └── services/
-│       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache, streaming
+│       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache, streaming, multi-turno
+│       ├── metadata_extraction.py # Segunda llamada al LLM que extrae project_metadata
 │       └── cache.py                # Cache exact-match sobre Redis
 ```
 
@@ -206,12 +284,14 @@ master-ai-engineering/
 uv run pytest -v
 ```
 
-Todos corren con mocks (sin API keys reales ni Redis corriendo):
+Todos corren con mocks (sin API keys reales; Redis sí debe estar corriendo porque el wrapper lo usa en cada llamada, aunque las entradas se descartan entre corridas):
 
 - Endpoints y mapeo de errores HTTP (`422`, `500`, `502`, `503`), incluida la versión de prompt.
+- Validación pura de Pydantic (`EstimationRequest`, `ReferenceProject`): límites de longitud, enum inválido, campo requerido faltante.
 - Clave de cache exact-match (determinismo, sensibilidad a cada parámetro).
-- Templates de prompt (`v1` y `v2`): contenido literal de la descripción, bloques condicionales mutuamente excluyentes, `reference_projects`, versión inexistente.
-- Streamlit (`AppTest`) con `httpx.MockTransport`: formulario, respuesta bloqueante, validación.
+- Templates de prompt (`v1` y `v2`): contenido literal de la descripción, bloques condicionales mutuamente excluyentes, `reference_projects`, versión inexistente, semántica de `StrictUndefined`.
+- Streamlit (`AppTest`) con `httpx.MockTransport`: formulario, respuesta bloqueante, validación, turno conversacional.
+- **Integración de sesiones** (`test_sessions_integration.py`, con `httpx.AsyncClient` sobre la app vía `ASGITransport`): `project_metadata` se actualiza y se fusiona a través de dos turnos; el contenido de un PDF adjunto efectivamente llega al LLM; la ventana deslizante nunca manda más de `MAX_CONVERSATION_TURNS` turnos al modelo aunque la sesión tenga más historial acumulado.
 
 ## Cómo mejorar las estimaciones
 

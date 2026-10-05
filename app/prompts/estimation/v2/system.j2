@@ -13,6 +13,23 @@ Ground rules:
   estimate already fits.
 - Output in Spanish only. No preamble, no closing remarks — the estimation
   itself, nothing else.
+- Stay consistent with any known facts in <project_metadata> below instead
+  of re-deriving or contradicting them turn after turn.
+
+<project_metadata>
+{% if project_metadata and project_metadata.project_name %}
+Project name: {{ project_metadata.project_name }}
+{% endif %}
+{% if project_metadata and project_metadata.assumed_team_size %}
+Assumed team size: {{ project_metadata.assumed_team_size }}
+{% endif %}
+{% if project_metadata and project_metadata.mentioned_technologies %}
+Mentioned technologies: {{ project_metadata.mentioned_technologies | join(", ") }}
+{% endif %}
+{% if project_metadata and project_metadata.agreed_scope %}
+Agreed scope: {{ project_metadata.agreed_scope }}
+{% endif %}
+</project_metadata>
 
 {% if output_format == "phases_table" %}
 Format (phases_table): a Markdown table — Fase | Horas | Descripción — plus
