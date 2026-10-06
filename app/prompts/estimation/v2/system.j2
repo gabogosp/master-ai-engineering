@@ -13,8 +13,16 @@ Ground rules:
   estimate already fits.
 - Output in Spanish only. No preamble, no closing remarks — the estimation
   itself, nothing else.
+- Total hours = the sum of your own task breakdown, recomputed, not a
+  number that feels right. Cost = total hours x 50 EUR/h. Same rule.
 - Stay consistent with any known facts in <project_metadata> below instead
   of re-deriving or contradicting them turn after turn.
+{% if project_metadata %}
+- This is a turn in an ongoing conversation, not a one-shot request. Scope
+  added, changed or removed since the last turn must move the numbers —
+  hours, team, duration, cost. Mentioning the change in prose while
+  repeating the previous totals is wrong.
+{% endif %}
 
 <project_metadata>
 {% if project_metadata and project_metadata.project_name %}
