@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 
+import instructor
 import litellm
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -21,6 +22,46 @@ def _bypass_exact_match_cache():
     observar."""
     with patch.object(svc._cache, "get", AsyncMock(return_value=None)):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _instructor_json_mode_for_mocked_router():
+    """El turno de sesión genera la estimación via Instructor (salida
+    estructurada). El modo default de producción (Mode.TOOLS) espera
+    tool_calls reales en la respuesta, pero litellm's `mock_response` solo
+    puede simular texto plano -- así que para estos tests, que mockean
+    Router.acompletion para inspeccionar los `messages` recibidos, forzamos
+    Mode.JSON (parsea directo el texto como JSON). Ya se verificó aparte,
+    contra la API real, que el Mode.TOOLS de producción funciona
+    correctamente; este override es sólo para que el mock basado en texto
+    sea parseable por Instructor."""
+    svc._instructor_client = None
+
+    def _json_mode_client() -> instructor.AsyncInstructor:
+        return instructor.from_litellm(svc._get_router().acompletion, mode=instructor.Mode.JSON)
+
+    with patch.object(svc, "_get_instructor_client", side_effect=_json_mode_client):
+        yield
+    svc._instructor_client = None
+
+
+def _estimation_result_json(summary: str = "Resumen de la estimación de prueba.") -> str:
+    return json.dumps(
+        {
+            "summary": summary,
+            "confidence_pct": 80,
+            "phases": [
+                {
+                    "name": "Implementación",
+                    "duration_weeks": 4,
+                    "cost_eur": 10_000,
+                    "summary": "Desarrollo del backend y frontend principal del proyecto.",
+                }
+            ],
+            "total_duration_weeks": 4,
+            "total_cost_eur": 10_000,
+        }
+    )
 
 PDF_WITH_BUDGET = b"""%PDF-1.4
 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
@@ -81,7 +122,7 @@ async def test_project_metadata_updates_across_two_turns():
                 '{"project_name": null, "assumed_team_size": null, '
                 '"mentioned_technologies": ["FastAPI"], "agreed_scope": null}'
             )
-        return "## Estimación\nTotal: 50 horas"
+        return _estimation_result_json()
 
     fake = _scripted_acompletion(script)
     with patch.object(svc.Router, "acompletion", new=fake):
@@ -125,8 +166,11 @@ async def test_attachment_content_reaches_the_llm():
             )
         user_content = messages[-1]["content"]
         if "Presupuesto previo: 200 horas" in user_content:
-            return "## Estimación\nSe detectó un presupuesto previo de 200 horas en el adjunto."
-        return "## Estimación\nSin información adicional en el adjunto."
+            return _estimation_result_json(
+                summary="Se detectó un presupuesto previo de 200 horas en el adjunto, "
+                "que se usa como referencia para esta estimación."
+            )
+        return _estimation_result_json(summary="Sin información adicional en el adjunto.")
 
     fake = _scripted_acompletion(script)
     with patch.object(svc.Router, "acompletion", new=fake):
@@ -142,7 +186,7 @@ async def test_attachment_content_reaches_the_llm():
             )
 
             assert response.status_code == 200
-            assert "200 horas" in response.json()["text"]
+            assert "200 horas" in response.json()["result"]["summary"]
 
 
 async def test_sliding_window_caps_messages_sent_to_llm():
@@ -161,7 +205,7 @@ async def test_sliding_window_caps_messages_sent_to_llm():
             )
         else:
             captured_message_counts.append(len(messages))
-            mock_response = "## Estimación\nTotal: 10 horas"
+            mock_response = _estimation_result_json()
         return litellm.completion(
             model="gpt-4o-mini",
             messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
@@ -187,65 +231,3 @@ async def test_sliding_window_caps_messages_sent_to_llm():
     # Y con 8 turnos (> MAX_TURNS=6 por defecto) el techo sí se alcanzó --
     # confirma que la ventana realmente recorta, no que nunca creció tanto.
     assert captured_message_counts[-1] == max_expected
-
-
-def _parse_sse(raw_body: str) -> list[tuple[str, str]]:
-    """Parser mínimo de SSE para los tests: devuelve [(event_type, data), ...]."""
-    events = []
-    event_type, data_lines = None, []
-    for line in raw_body.splitlines():
-        if line == "":
-            if data_lines:
-                events.append((event_type or "message", "\n".join(data_lines)))
-            event_type, data_lines = None, []
-            continue
-        if line.startswith("data:"):
-            data_lines.append(line[len("data:") :].lstrip())
-        elif line.startswith("event:"):
-            event_type = line[len("event:") :].strip()
-    if data_lines:
-        events.append((event_type or "message", "\n".join(data_lines)))
-    return events
-
-
-async def test_session_stream_endpoint_streams_and_updates_metadata():
-    """El endpoint SSE de sesión debe producir el mismo resultado final que
-    el bloqueante (project_metadata fusionado, history_turns), pero
-    entregando el texto en chunks en vez de una sola respuesta."""
-
-    def script(messages: list[dict]) -> str:
-        system_content = messages[0]["content"]
-        if METADATA_SYSTEM_MARKER in system_content:
-            return (
-                '{"project_name": "Turnos VetCare", "assumed_team_size": null, '
-                '"mentioned_technologies": [], "agreed_scope": null}'
-            )
-        return "## Estimación en streaming\nTotal: 55 horas"
-
-    fake = _scripted_acompletion(script)
-    with patch.object(svc.Router, "acompletion", new=fake):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            session_resp = await client.post("/api/v1/sessions")
-            session_id = session_resp.json()["session_id"]
-
-            async with client.stream(
-                "POST",
-                f"/api/v1/sessions/{session_id}/estimate/stream",
-                data={"transcript": "El cliente es una clínica veterinaria."},
-            ) as response:
-                assert response.status_code == 200
-                body = (await response.aread()).decode()
-
-    events = _parse_sse(body)
-    text_chunks = [data for event, data in events if event == "message"]
-    meta_events = [data for event, data in events if event == "meta"]
-
-    assert text_chunks  # llegó al menos un chunk de texto
-    assembled = "".join(json.loads(c) for c in text_chunks)
-    assert "55 horas" in assembled
-
-    assert len(meta_events) == 1
-    meta = json.loads(meta_events[0])
-    assert meta["project_metadata"]["project_name"] == "Turnos VetCare"
-    assert meta["history_turns"] == 1

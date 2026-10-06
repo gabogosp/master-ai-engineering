@@ -1,4 +1,3 @@
-import json
 import time
 
 import httpx
@@ -16,10 +15,10 @@ st.title("📋 Estimador de Proyectos")
 
 
 def call_estimate(payload: dict, prompt_version: str) -> dict:
-    """POST bloqueante a /api/v1/estimate: la respuesta llega completa de una
-    sola vez (texto libre, sin streaming). Es el contrato que pide esta
-    entrega — /api/v1/estimate/stream (SSE) sigue existiendo en el backend
-    para otros clientes, pero este formulario ya no lo usa."""
+    """POST bloqueante a /api/v1/estimate. La respuesta ya no es texto libre
+    sino un EstimationResult estructurado (ver app.schemas) -- Instructor
+    valida la forma contra el modelo antes de devolverla, lo que a su vez
+    hace que no se pueda transmitir en streaming token por token."""
     url = f"{settings.backend_url}/api/v1/estimate"
     with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
         response = client.post(url, json=payload, params={"prompt_version": prompt_version})
@@ -31,6 +30,45 @@ def call_estimate(payload: dict, prompt_version: str) -> dict:
         raise RuntimeError(f"Error {response.status_code}: {detail}")
 
     return response.json()
+
+
+def call_session_estimate(session_id: str, transcript: str, uploaded_files: list) -> dict:
+    """POST bloqueante multipart/form-data a /api/v1/sessions/{id}/estimate."""
+    url = f"{settings.backend_url}/api/v1/sessions/{session_id}/estimate"
+    files = [
+        ("attachments", (f.name, f.getvalue(), f.type or "application/octet-stream"))
+        for f in uploaded_files
+    ]
+    with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
+        response = client.post(url, data={"transcript": transcript}, files=files or None)
+
+    if response.status_code != 200:
+        detail = response.text
+        if "application/json" in response.headers.get("content-type", ""):
+            detail = response.json().get("detail", detail)
+        raise RuntimeError(f"Error {response.status_code}: {detail}")
+
+    return response.json()
+
+
+def format_estimation_markdown(result: dict) -> str:
+    """Convierte un EstimationResult (dict) en un bloque markdown único:
+    summary, una fase por bullet (con su propio summary) y los totales. Se
+    guarda como texto plano en el historial de conversación, así el replay
+    de mensajes (st.markdown sobre el string guardado) no necesita conocer
+    la forma estructurada."""
+    lines = [result["summary"], ""]
+    for phase in result["phases"]:
+        lines.append(
+            f"- **{phase['name']}** — {phase['duration_weeks']} semana(s), "
+            f"{phase['cost_eur']:,} EUR: {phase['summary']}"
+        )
+    lines.append("")
+    lines.append(
+        f"**Total:** {result['total_duration_weeks']} semana(s) · "
+        f"{result['total_cost_eur']:,} EUR · Confianza: {result['confidence_pct']}%"
+    )
+    return "\n".join(lines)
 
 
 def render_metrics(placeholder, metrics: dict | None):
@@ -68,64 +106,6 @@ def create_conversation_session() -> str:
         response = client.post(url)
     response.raise_for_status()
     return response.json()["session_id"]
-
-
-def _iter_sse_events(response: httpx.Response):
-    """Parser mínimo del wire format de Server-Sent Events: bloques de
-    líneas `field: value` separados por una línea en blanco."""
-    event_type = None
-    data_lines: list[str] = []
-    for line in response.iter_lines():
-        if line == "":
-            if data_lines:
-                yield event_type or "message", "\n".join(data_lines)
-            event_type, data_lines = None, []
-            continue
-        if line.startswith("data:"):
-            data_lines.append(line[len("data:") :].lstrip())
-        elif line.startswith("event:"):
-            event_type = line[len("event:") :].strip()
-    if data_lines:
-        yield event_type or "message", "\n".join(data_lines)
-
-
-def stream_session_estimate(session_id: str, transcript: str, uploaded_files: list):
-    """POST multipart/form-data a /api/v1/sessions/{id}/estimate/stream
-    (SSE). Devuelve (generador_de_texto, result_holder): result_holder se
-    llena al terminar el stream (evento `meta`, con project_metadata y
-    history_turns incluidos; o `error` si algo salió mal)."""
-    result_holder: dict = {}
-
-    def _gen():
-        url = f"{settings.backend_url}/api/v1/sessions/{session_id}/estimate/stream"
-        files = [
-            ("attachments", (f.name, f.getvalue(), f.type or "application/octet-stream"))
-            for f in uploaded_files
-        ]
-        with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
-            with client.stream(
-                "POST", url, data={"transcript": transcript}, files=files or None
-            ) as response:
-                if response.status_code != 200:
-                    response.read()
-                    detail = response.text
-                    if "application/json" in response.headers.get("content-type", ""):
-                        detail = response.json().get("detail", detail)
-                    result_holder["error"] = f"Error {response.status_code}: {detail}"
-                    yield f"⚠️ {result_holder['error']}"
-                    return
-
-                for event_type, raw_data in _iter_sse_events(response):
-                    data = json.loads(raw_data)
-                    if event_type == "message":
-                        yield data
-                    elif event_type == "meta":
-                        result_holder.update(data)
-                    elif event_type == "error":
-                        result_holder["error"] = data
-                        yield f"\n\n⚠️ {data}"
-
-    return _gen(), result_holder
 
 
 def render_project_metadata(placeholder, metadata: dict | None, history_turns: int | None):
@@ -236,7 +216,7 @@ with tab_quick:
                 st.error(str(exc))
                 metrics_holder = {"error": str(exc)}
             else:
-                st.markdown(result["text"])
+                st.markdown(format_estimation_markdown(result["result"]))
                 metrics_holder = {
                     "model": result["model"],
                     "provider": result["provider"],
@@ -301,35 +281,37 @@ with tab_conversation:
 
         start_time = time.perf_counter()
         with st.chat_message("assistant"):
-            generator, result_holder = stream_session_estimate(
-                st.session_state.session_id, transcript, uploaded_files or []
-            )
-            full_response = st.write_stream(generator)
+            try:
+                with st.spinner("Generando estimación..."):
+                    response = call_session_estimate(
+                        st.session_state.session_id, transcript, uploaded_files or []
+                    )
+            except RuntimeError as exc:
+                st.error(str(exc))
+                st.session_state.last_metrics = {"error": str(exc)}
+            else:
+                formatted = format_estimation_markdown(response["result"])
+                st.markdown(formatted)
+                st.session_state.conversation_messages.append(
+                    {"role": "assistant", "content": formatted}
+                )
+                st.session_state.session_metadata = response.get("project_metadata")
+                st.session_state.session_history_turns = response.get("history_turns")
+                render_project_metadata(
+                    metadata_placeholder,
+                    st.session_state.session_metadata,
+                    st.session_state.session_history_turns,
+                )
 
-        if result_holder.get("error"):
-            st.error(result_holder["error"])
-            st.session_state.last_metrics = {"error": result_holder["error"]}
-        else:
-            st.session_state.conversation_messages.append(
-                {"role": "assistant", "content": full_response}
-            )
-            st.session_state.session_metadata = result_holder.get("project_metadata")
-            st.session_state.session_history_turns = result_holder.get("history_turns")
-            render_project_metadata(
-                metadata_placeholder,
-                st.session_state.session_metadata,
-                st.session_state.session_history_turns,
-            )
-
-            # La sidebar de "Observabilidad" es compartida entre las dos
-            # pestañas: un turno de conversación también la actualiza, igual
-            # que lo hace una estimación rápida.
-            st.session_state.last_metrics = {
-                "model": result_holder.get("model"),
-                "provider": result_holder.get("provider"),
-                "prompt_version": result_holder.get("prompt_version"),
-                "input_tokens": result_holder.get("input_tokens"),
-                "output_tokens": result_holder.get("output_tokens"),
-                "elapsed_time": round(time.perf_counter() - start_time, 2),
-            }
+                # La sidebar de "Observabilidad" es compartida entre las dos
+                # pestañas: un turno de conversación también la actualiza, igual
+                # que lo hace una estimación rápida.
+                st.session_state.last_metrics = {
+                    "model": response.get("model"),
+                    "provider": response.get("provider"),
+                    "prompt_version": response.get("prompt_version"),
+                    "input_tokens": response.get("input_tokens"),
+                    "output_tokens": response.get("output_tokens"),
+                    "elapsed_time": round(time.perf_counter() - start_time, 2),
+                }
         render_metrics(metrics_placeholder, st.session_state.last_metrics)

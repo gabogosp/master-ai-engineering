@@ -45,7 +45,7 @@ def test_output_format_keyword_is_mutually_exclusive():
 def test_detailed_level_adds_per_phase_assumptions_instruction():
     """detail_level=detailed agrega la instrucción de listar asunciones por
     fase; summary no debe incluirla."""
-    marker = "list each phase's own assumptions and risks"
+    marker = "list its own assumptions and risks"
 
     system_detailed, _ = render_estimation_prompt(_request(detail_level=DetailLevel.DETAILED))
     assert marker in system_detailed
@@ -57,8 +57,8 @@ def test_detailed_level_adds_per_phase_assumptions_instruction():
 def test_system_prompt_includes_examples():
     """El system prompt debe incluir los ejemplos few-shot via {% include %}."""
     system, _ = render_estimation_prompt(_request())
-    assert "Previous estimation examples" in system
-    assert "<example number=\"1\">" in system
+    assert "<examples>" in system
+    assert "<example>" in system
 
 
 def test_reference_projects_are_rendered_when_present():
