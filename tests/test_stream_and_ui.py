@@ -18,6 +18,16 @@ FAKE_RESPONSE_BODY = {
 
 FAKE_SESSION_ID = "11111111-1111-1111-1111-111111111111"
 
+FAKE_SESSION_SSE_BODY = (
+    b'data: "## Estimaci\\u00f3n de prueba\\n"\n\n'
+    b'data: "Total: 42 horas"\n\n'
+    b"event: meta\n"
+    b'data: {"prompt_version": "v1", "model": "gpt-4o-mini-mock", "provider": "openai", '
+    b'"input_tokens": 111, "output_tokens": 22, '
+    b'"project_metadata": {"project_name": "Turnos VetCare", "assumed_team_size": 2, '
+    b'"mentioned_technologies": ["FastAPI"], "agreed_scope": null}, "history_turns": 1}\n\n'
+)
+
 
 def _fake_handler(request: httpx.Request) -> httpx.Response:
     path = request.url.path
@@ -25,19 +35,9 @@ def _fake_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"session_id": FAKE_SESSION_ID})
     if path == "/api/v1/estimate":
         return httpx.Response(200, json=FAKE_RESPONSE_BODY)
-    if path == f"/api/v1/sessions/{FAKE_SESSION_ID}/estimate":
+    if path == f"/api/v1/sessions/{FAKE_SESSION_ID}/estimate/stream":
         return httpx.Response(
-            200,
-            json={
-                **FAKE_RESPONSE_BODY,
-                "project_metadata": {
-                    "project_name": "Turnos VetCare",
-                    "assumed_team_size": 2,
-                    "mentioned_technologies": ["FastAPI"],
-                    "agreed_scope": None,
-                },
-                "history_turns": 1,
-            },
+            200, content=FAKE_SESSION_SSE_BODY, headers={"content-type": "text/event-stream"}
         )
     raise AssertionError(f"Llamada inesperada a {path}")
 

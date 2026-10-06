@@ -240,26 +240,16 @@ async def generate_conversation_turn(messages: list[dict]) -> LLMResult:
     return await _call_llm(messages, cache_key, call_logger)
 
 
-async def stream_estimation(
-    system: str,
-    user: str,
-    on_complete: Callable[[LLMResult], None] | None = None,
+async def _stream_llm(
+    messages: list[dict],
+    cache_key: str,
+    call_logger,
+    on_complete: Callable[[LLMResult], None] | None,
 ) -> AsyncIterator[str]:
-    """Yieldea la estimación token a token a través del wrapper (mismo cache
-    y fallback que `generate_estimation`), recibiendo `system`/`user` ya
-    renderizados.
-
-    Esta función no sabe nada de Streamlit ni de SSE: solo produce texto. Si
-    el llamador necesita los metadatos finales (modelo, proveedor, tokens),
-    pasa `on_complete`, que se invoca una única vez al terminar el stream con
-    el `LLMResult` completo. Así cada consumidor (Streamlit, un endpoint SSE)
-    arma su propia UI sin que este módulo conozca a ninguno de los dos.
-    """
-    cache_key = _cache_key_for(system, user)
-    call_logger = logger.bind(
-        requested_provider=settings.llm_provider, requested_model=settings.llm_model
-    )
-
+    """Lógica compartida de streaming (cache, Router, logging) entre un
+    stream de un solo turno (`stream_estimation`) y uno multi-turno
+    (`stream_conversation_turn`) -- mismo patrón que `_call_llm` para las
+    versiones bloqueantes."""
     cached = await _cache.get(cache_key)
     if cached is not None:
         call_logger.info("llm_cache_hit", streaming=True)
@@ -282,10 +272,7 @@ async def stream_estimation(
     try:
         stream = await router.acompletion(
             model=PRIMARY_GROUP,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=messages,
             temperature=TEMPERATURE,
             max_tokens=MAX_OUTPUT_TOKENS,
             stream=True,
@@ -342,3 +329,48 @@ async def stream_estimation(
     await _cache.set(cache_key, asdict(result))
     if on_complete:
         on_complete(result)
+
+
+async def stream_estimation(
+    system: str,
+    user: str,
+    on_complete: Callable[[LLMResult], None] | None = None,
+) -> AsyncIterator[str]:
+    """Yieldea la estimación token a token a través del wrapper (mismo cache
+    y fallback que `generate_estimation`), recibiendo `system`/`user` ya
+    renderizados.
+
+    Esta función no sabe nada de Streamlit ni de SSE: solo produce texto. Si
+    el llamador necesita los metadatos finales (modelo, proveedor, tokens),
+    pasa `on_complete`, que se invoca una única vez al terminar el stream con
+    el `LLMResult` completo. Así cada consumidor (Streamlit, un endpoint SSE)
+    arma su propia UI sin que este módulo conozca a ninguno de los dos.
+    """
+    cache_key = _cache_key_for(system, user)
+    call_logger = logger.bind(
+        requested_provider=settings.llm_provider, requested_model=settings.llm_model
+    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    async for chunk in _stream_llm(messages, cache_key, call_logger, on_complete):
+        yield chunk
+
+
+async def stream_conversation_turn(
+    messages: list[dict],
+    on_complete: Callable[[LLMResult], None] | None = None,
+) -> AsyncIterator[str]:
+    """Versión streaming de `generate_conversation_turn`: `messages` ya
+    viene armado por ConversationHistory.to_messages_list() + el turno
+    nuevo. Mismo cache/fallback/logging que su contraparte bloqueante,
+    vía `_stream_llm`."""
+    cache_key = _cache_key_for_messages(messages)
+    call_logger = logger.bind(
+        requested_provider=settings.llm_provider,
+        requested_model=settings.llm_model,
+        conversation_turns=(len(messages) - 1) // 2,
+    )
+    async for chunk in _stream_llm(messages, cache_key, call_logger, on_complete):
+        yield chunk

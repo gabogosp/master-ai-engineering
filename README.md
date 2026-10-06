@@ -175,7 +175,8 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 **💬 Conversación** (sesión 05):
 - Crea una sesión (`POST /sessions`) al cargar la página.
 - Chat (`st.chat_input`) + subida de adjuntos (`st.file_uploader`, PDF/Word).
-- Panel expandible con el `project_metadata` actual y cuántos turnos hay en la ventana deslizante — útil para ver en vivo la separación entre memoria y historial.
+- **Streaming**: consume `POST /sessions/{id}/estimate/stream` (SSE) — el texto aparece token a token en vez del patrón spinner-y-todo-de-golpe. A diferencia de "Estimación rápida" (donde el bloqueo es a propósito, confirmado explícitamente para ese ejercicio), acá no había ninguna restricción equivalente, así que se corrigió el anti-patrón.
+- Panel expandible con el `project_metadata` actual y cuántos turnos hay en la ventana deslizante — útil para ver en vivo la separación entre memoria y historial. Se actualiza cuando termina el stream (evento `meta`).
 - Botón "Nueva conversación" que crea una sesión nueva y resetea el estado local.
 
 ## Conversación multi-turno con memoria (sesión 05)
@@ -222,6 +223,12 @@ La respuesta es el mismo `EstimationResponse` del endpoint de formulario, con do
   "history_turns": 1
 }
 ```
+
+### `POST /api/v1/sessions/{session_id}/estimate/stream`
+
+Igual que el anterior pero via Server-Sent Events — es el que usa el cliente Streamlit. Un evento `data` por chunk de texto, y un evento final `event: meta` con los mismos campos extra (`project_metadata`, `history_turns`) más `model`/`provider`/tokens/`prompt_version`. Mismo matiz que `/api/v1/estimate/stream`: una vez que sale el primer chunk la respuesta está comprometida a `200 text/event-stream`, así que los errores (sesión inexistente incluida) se comunican como `event: error`, no como un código HTTP distinto.
+
+A diferencia de `/api/v1/estimate/stream` (que el formulario de la pestaña "Estimación rápida" **no** usa, por la confirmación explícita del profesor sobre ese ejercicio), este sí es el que consume la pestaña "Conversación" — ahí no había una restricción equivalente contra el streaming.
 
 ### Decisión: adjuntos — Camino B (extracción local)
 
@@ -271,7 +278,7 @@ master-ai-engineering/
 │   │   └── metadata_extraction/v1/  # Templates Jinja2 de extracción de metadata
 │   ├── routers/
 │   │   ├── estimations.py         # POST /estimate y /estimate/stream
-│   │   └── sessions.py            # POST /sessions y /sessions/{id}/estimate
+│   │   └── sessions.py            # POST /sessions, /estimate y /estimate/stream (SSE)
 │   └── services/
 │       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache, streaming, multi-turno
 │       ├── metadata_extraction.py # Segunda llamada al LLM que extrae project_metadata
@@ -291,7 +298,7 @@ Todos corren con mocks (sin API keys reales; Redis sí debe estar corriendo porq
 - Clave de cache exact-match (determinismo, sensibilidad a cada parámetro).
 - Templates de prompt (`v1` y `v2`): contenido literal de la descripción, bloques condicionales mutuamente excluyentes, `reference_projects`, versión inexistente, semántica de `StrictUndefined`.
 - Streamlit (`AppTest`) con `httpx.MockTransport`: formulario, respuesta bloqueante, validación, turno conversacional.
-- **Integración de sesiones** (`test_sessions_integration.py`, con `httpx.AsyncClient` sobre la app vía `ASGITransport`): `project_metadata` se actualiza y se fusiona a través de dos turnos; el contenido de un PDF adjunto efectivamente llega al LLM; la ventana deslizante nunca manda más de `MAX_CONVERSATION_TURNS` turnos al modelo aunque la sesión tenga más historial acumulado.
+- **Integración de sesiones** (`test_sessions_integration.py`, con `httpx.AsyncClient` sobre la app vía `ASGITransport`): `project_metadata` se actualiza y se fusiona a través de dos turnos; el contenido de un PDF adjunto efectivamente llega al LLM; la ventana deslizante nunca manda más de `MAX_CONVERSATION_TURNS` turnos al modelo aunque la sesión tenga más historial acumulado; el endpoint SSE de sesión produce chunks de texto y un evento `meta` final con el mismo resultado que el bloqueante.
 
 ## Cómo mejorar las estimaciones
 

@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from unittest.mock import AsyncMock, patch
 
@@ -55,6 +56,8 @@ def _scripted_acompletion(script: Callable[[list[dict]], str]):
             model="gpt-4o-mini",
             messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
             mock_response=mock_response,
+            stream=kwargs.get("stream", False),
+            stream_options=kwargs.get("stream_options"),
         )
 
     return _fake
@@ -184,3 +187,65 @@ async def test_sliding_window_caps_messages_sent_to_llm():
     # Y con 8 turnos (> MAX_TURNS=6 por defecto) el techo sí se alcanzó --
     # confirma que la ventana realmente recorta, no que nunca creció tanto.
     assert captured_message_counts[-1] == max_expected
+
+
+def _parse_sse(raw_body: str) -> list[tuple[str, str]]:
+    """Parser mínimo de SSE para los tests: devuelve [(event_type, data), ...]."""
+    events = []
+    event_type, data_lines = None, []
+    for line in raw_body.splitlines():
+        if line == "":
+            if data_lines:
+                events.append((event_type or "message", "\n".join(data_lines)))
+            event_type, data_lines = None, []
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[len("data:") :].lstrip())
+        elif line.startswith("event:"):
+            event_type = line[len("event:") :].strip()
+    if data_lines:
+        events.append((event_type or "message", "\n".join(data_lines)))
+    return events
+
+
+async def test_session_stream_endpoint_streams_and_updates_metadata():
+    """El endpoint SSE de sesión debe producir el mismo resultado final que
+    el bloqueante (project_metadata fusionado, history_turns), pero
+    entregando el texto en chunks en vez de una sola respuesta."""
+
+    def script(messages: list[dict]) -> str:
+        system_content = messages[0]["content"]
+        if METADATA_SYSTEM_MARKER in system_content:
+            return (
+                '{"project_name": "Turnos VetCare", "assumed_team_size": null, '
+                '"mentioned_technologies": [], "agreed_scope": null}'
+            )
+        return "## Estimación en streaming\nTotal: 55 horas"
+
+    fake = _scripted_acompletion(script)
+    with patch.object(svc.Router, "acompletion", new=fake):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            session_resp = await client.post("/api/v1/sessions")
+            session_id = session_resp.json()["session_id"]
+
+            async with client.stream(
+                "POST",
+                f"/api/v1/sessions/{session_id}/estimate/stream",
+                data={"transcript": "El cliente es una clínica veterinaria."},
+            ) as response:
+                assert response.status_code == 200
+                body = (await response.aread()).decode()
+
+    events = _parse_sse(body)
+    text_chunks = [data for event, data in events if event == "message"]
+    meta_events = [data for event, data in events if event == "meta"]
+
+    assert text_chunks  # llegó al menos un chunk de texto
+    assembled = "".join(json.loads(c) for c in text_chunks)
+    assert "55 horas" in assembled
+
+    assert len(meta_events) == 1
+    meta = json.loads(meta_events[0])
+    assert meta["project_metadata"]["project_name"] == "Turnos VetCare"
+    assert meta["history_turns"] == 1

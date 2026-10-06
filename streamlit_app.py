@@ -1,3 +1,4 @@
+import json
 import time
 
 import httpx
@@ -69,24 +70,62 @@ def create_conversation_session() -> str:
     return response.json()["session_id"]
 
 
-def call_session_estimate(session_id: str, transcript: str, uploaded_files: list) -> dict:
-    """POST multipart/form-data a /api/v1/sessions/{id}/estimate: el
-    transcript como campo de formulario, los adjuntos como archivos."""
-    url = f"{settings.backend_url}/api/v1/sessions/{session_id}/estimate"
-    files = [
-        ("attachments", (f.name, f.getvalue(), f.type or "application/octet-stream"))
-        for f in uploaded_files
-    ]
-    with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
-        response = client.post(url, data={"transcript": transcript}, files=files or None)
+def _iter_sse_events(response: httpx.Response):
+    """Parser mínimo del wire format de Server-Sent Events: bloques de
+    líneas `field: value` separados por una línea en blanco."""
+    event_type = None
+    data_lines: list[str] = []
+    for line in response.iter_lines():
+        if line == "":
+            if data_lines:
+                yield event_type or "message", "\n".join(data_lines)
+            event_type, data_lines = None, []
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[len("data:") :].lstrip())
+        elif line.startswith("event:"):
+            event_type = line[len("event:") :].strip()
+    if data_lines:
+        yield event_type or "message", "\n".join(data_lines)
 
-    if response.status_code != 200:
-        detail = response.text
-        if "application/json" in response.headers.get("content-type", ""):
-            detail = response.json().get("detail", detail)
-        raise RuntimeError(f"Error {response.status_code}: {detail}")
 
-    return response.json()
+def stream_session_estimate(session_id: str, transcript: str, uploaded_files: list):
+    """POST multipart/form-data a /api/v1/sessions/{id}/estimate/stream
+    (SSE). Devuelve (generador_de_texto, result_holder): result_holder se
+    llena al terminar el stream (evento `meta`, con project_metadata y
+    history_turns incluidos; o `error` si algo salió mal)."""
+    result_holder: dict = {}
+
+    def _gen():
+        url = f"{settings.backend_url}/api/v1/sessions/{session_id}/estimate/stream"
+        files = [
+            ("attachments", (f.name, f.getvalue(), f.type or "application/octet-stream"))
+            for f in uploaded_files
+        ]
+        with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
+            with client.stream(
+                "POST", url, data={"transcript": transcript}, files=files or None
+            ) as response:
+                if response.status_code != 200:
+                    response.read()
+                    detail = response.text
+                    if "application/json" in response.headers.get("content-type", ""):
+                        detail = response.json().get("detail", detail)
+                    result_holder["error"] = f"Error {response.status_code}: {detail}"
+                    yield f"⚠️ {result_holder['error']}"
+                    return
+
+                for event_type, raw_data in _iter_sse_events(response):
+                    data = json.loads(raw_data)
+                    if event_type == "message":
+                        yield data
+                    elif event_type == "meta":
+                        result_holder.update(data)
+                    elif event_type == "error":
+                        result_holder["error"] = data
+                        yield f"\n\n⚠️ {data}"
+
+    return _gen(), result_holder
 
 
 def render_project_metadata(placeholder, metadata: dict | None, history_turns: int | None):
@@ -261,22 +300,21 @@ with tab_conversation:
         st.session_state.conversation_messages.append({"role": "user", "content": transcript})
 
         with st.chat_message("assistant"):
-            try:
-                with st.spinner("Pensando..."):
-                    result = call_session_estimate(
-                        st.session_state.session_id, transcript, uploaded_files or []
-                    )
-            except RuntimeError as exc:
-                st.error(str(exc))
-            else:
-                st.markdown(result["text"])
-                st.session_state.conversation_messages.append(
-                    {"role": "assistant", "content": result["text"]}
-                )
-                st.session_state.session_metadata = result.get("project_metadata")
-                st.session_state.session_history_turns = result.get("history_turns")
-                render_project_metadata(
-                    metadata_placeholder,
-                    st.session_state.session_metadata,
-                    st.session_state.session_history_turns,
-                )
+            generator, result_holder = stream_session_estimate(
+                st.session_state.session_id, transcript, uploaded_files or []
+            )
+            full_response = st.write_stream(generator)
+
+        if result_holder.get("error"):
+            st.error(result_holder["error"])
+        else:
+            st.session_state.conversation_messages.append(
+                {"role": "assistant", "content": full_response}
+            )
+            st.session_state.session_metadata = result_holder.get("project_metadata")
+            st.session_state.session_history_turns = result_holder.get("history_turns")
+            render_project_metadata(
+                metadata_placeholder,
+                st.session_state.session_metadata,
+                st.session_state.session_history_turns,
+            )
