@@ -138,3 +138,12 @@ def test_streamlit_conversation_turn_updates_metadata():
         assert metadata["project_name"] == "Turnos VetCare"
         assert metadata["mentioned_technologies"] == ["FastAPI"]
         assert at.session_state["session_history_turns"] == 1
+
+        # La sidebar de Observabilidad es compartida entre pestañas: un
+        # turno de conversación también debe actualizar last_metrics.
+        last_metrics = at.session_state["last_metrics"]
+        assert last_metrics["model"] == "gpt-4o-mini-mock"
+        assert last_metrics["provider"] == "openai"
+        assert last_metrics["input_tokens"] == 111
+        assert last_metrics["output_tokens"] == 22
+        assert "elapsed_time" in last_metrics

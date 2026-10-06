@@ -299,6 +299,7 @@ with tab_conversation:
             st.markdown(transcript)
         st.session_state.conversation_messages.append({"role": "user", "content": transcript})
 
+        start_time = time.perf_counter()
         with st.chat_message("assistant"):
             generator, result_holder = stream_session_estimate(
                 st.session_state.session_id, transcript, uploaded_files or []
@@ -307,6 +308,7 @@ with tab_conversation:
 
         if result_holder.get("error"):
             st.error(result_holder["error"])
+            st.session_state.last_metrics = {"error": result_holder["error"]}
         else:
             st.session_state.conversation_messages.append(
                 {"role": "assistant", "content": full_response}
@@ -318,3 +320,16 @@ with tab_conversation:
                 st.session_state.session_metadata,
                 st.session_state.session_history_turns,
             )
+
+            # La sidebar de "Observabilidad" es compartida entre las dos
+            # pestañas: un turno de conversación también la actualiza, igual
+            # que lo hace una estimación rápida.
+            st.session_state.last_metrics = {
+                "model": result_holder.get("model"),
+                "provider": result_holder.get("provider"),
+                "prompt_version": result_holder.get("prompt_version"),
+                "input_tokens": result_holder.get("input_tokens"),
+                "output_tokens": result_holder.get("output_tokens"),
+                "elapsed_time": round(time.perf_counter() - start_time, 2),
+            }
+        render_metrics(metrics_placeholder, st.session_state.last_metrics)
