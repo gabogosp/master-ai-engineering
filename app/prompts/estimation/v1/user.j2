@@ -1,0 +1,22 @@
+## Project brief
+
+Project type: {{ project_type.value }}
+
+<project_description>
+{{ description }}
+</project_description>
+
+{% if reference_projects %}
+## Reference projects
+
+These are past projects for context and calibration only — do not estimate
+them, only use them as a reference point for scope and hourly effort.
+
+{% for project in reference_projects %}
+<reference_project number="{{ loop.index }}">
+<name>{{ project.name }}</name>
+<description>{{ project.description }}</description>
+<actual_hours>{{ project.hours }}</actual_hours>
+</reference_project>
+{% endfor %}
+{% endif %}
