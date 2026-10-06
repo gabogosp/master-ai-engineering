@@ -1,5 +1,8 @@
 services:
   redis:
-    image: redis:7-alpine
+    # redis-stack trae el módulo RediSearch que redisvl necesita para las
+    # queries de similitud vectorial de la cache semántica -- el redis:7-alpine
+    # vanilla no lo incluye.
+    image: redis/redis-stack-server:7.4.0-v3
     ports:
       - "6379:6379"

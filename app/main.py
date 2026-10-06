@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.logging_config import configure_logging
-from app.routers import estimations
+from app.routers import estimations, sessions
 
 # Las librerías de terceros (uvicorn, httpx...) siguen en logging estándar,
 # limitadas a WARNING porque en DEBUG pueden imprimir mucho, incluido el
@@ -23,6 +23,7 @@ app = FastAPI(
 )
 
 app.include_router(estimations.router, prefix="/api/v1")
+app.include_router(sessions.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["health"])

@@ -1,13 +1,17 @@
 import time
-from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
+from typing import Generic, TypeVar
 
+import instructor
 import openai
 import structlog
 from litellm import Router
+from pydantic import BaseModel
 
 from app.config import settings
 from app.services.cache import ExactMatchCache, build_cache_key
+
+T = TypeVar("T", bound=BaseModel)
 
 MAX_OUTPUT_TOKENS = 4096
 TEMPERATURE = 0.3
@@ -35,6 +39,13 @@ class LLMConfigurationError(Exception):
     """Falta configuración del servicio, por ejemplo la API key del proveedor."""
 
 
+class EstimationValidationError(Exception):
+    """Instructor agotó los reintentos (max_retries) sin que el modelo
+    produjera una respuesta que pasara los model_validator de
+    EstimationResult -- el modelo no logró corregir la aritmética o la
+    regla de confianza baja a tiempo."""
+
+
 # LiteLLM traduce los errores de cualquier proveedor (OpenAI, Anthropic, o
 # cualquiera de los más de 100 que soporta) a subclases de las excepciones de
 # `openai`. Por eso alcanza con capturar `openai.*`: cubre tanto un error real
@@ -60,6 +71,16 @@ class LLMResult:
     provider: str
     input_tokens: int
     output_tokens: int
+
+
+@dataclass
+class StructuredLLMResult(Generic[T]):
+    result: T
+    model: str
+    provider: str
+    input_tokens: int
+    output_tokens: int
+    cached: bool = False
 
 
 def _api_key_for(provider: str) -> str | None:
@@ -117,6 +138,22 @@ def _get_router() -> Router:
     return _router
 
 
+# El cliente de Instructor envuelve `router.acompletion` (no `litellm.completion`
+# directo): así las llamadas con salida estructurada también se benefician del
+# fallback openai<->anthropic del Router, en vez de perderlo -- verificado a
+# mano que Instructor efectivamente invoca al Router y que el mensaje de error
+# de un model_validator fallido vuelve a viajar en el reintento.
+_instructor_client: instructor.AsyncInstructor | None = None
+
+
+def _get_instructor_client() -> instructor.AsyncInstructor:
+    global _instructor_client
+    if _instructor_client is None:
+        router = _get_router()
+        _instructor_client = instructor.from_litellm(router.acompletion)
+    return _instructor_client
+
+
 def _cache_key_for(system: str, user: str) -> str:
     # Todo parámetro que pueda afectar la respuesta va acá, aunque hoy sea
     # una constante de módulo (MAX_OUTPUT_TOKENS, TEMPERATURE): si alguna vez
@@ -131,17 +168,20 @@ def _cache_key_for(system: str, user: str) -> str:
     )
 
 
-async def generate_estimation(system: str, user: str) -> LLMResult:
-    """Llama al modelo con `system` y `user` ya renderizados (ver
-    app.prompts.loader.render_estimation_prompt). Este módulo no sabe nada
-    de proyectos, CAG ni templates: solo dos strings y una llamada al LLM.
-    """
-    cache_key = _cache_key_for(system, user)
-
-    call_logger = logger.bind(
-        requested_provider=settings.llm_provider, requested_model=settings.llm_model
+def _cache_key_for_messages(messages: list[dict]) -> str:
+    return build_cache_key(
+        messages=messages,
+        model=settings.llm_model,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
 
+
+async def _call_llm(messages: list[dict], cache_key: str, call_logger) -> LLMResult:
+    """Lógica compartida (cache, Router, logging) entre una llamada de un
+    solo turno (`generate_estimation`) y una multi-turno
+    (`generate_conversation_turn`): a esta altura ambas son lo mismo, un
+    array `messages` y una clave de cache."""
     cached = await _cache.get(cache_key)
     if cached is not None:
         call_logger.info("llm_cache_hit")
@@ -154,10 +194,7 @@ async def generate_estimation(system: str, user: str) -> LLMResult:
     try:
         response = await router.acompletion(
             model=PRIMARY_GROUP,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            messages=messages,
             temperature=TEMPERATURE,
             max_tokens=MAX_OUTPUT_TOKENS,
         )
@@ -205,94 +242,112 @@ async def generate_estimation(system: str, user: str) -> LLMResult:
     return result
 
 
-async def stream_estimation(
-    system: str,
-    user: str,
-    on_complete: Callable[[LLMResult], None] | None = None,
-) -> AsyncIterator[str]:
-    """Yieldea la estimación token a token a través del wrapper (mismo cache
-    y fallback que `generate_estimation`), recibiendo `system`/`user` ya
-    renderizados.
-
-    Esta función no sabe nada de Streamlit ni de SSE: solo produce texto. Si
-    el llamador necesita los metadatos finales (modelo, proveedor, tokens),
-    pasa `on_complete`, que se invoca una única vez al terminar el stream con
-    el `LLMResult` completo. Así cada consumidor (Streamlit, un endpoint SSE)
-    arma su propia UI sin que este módulo conozca a ninguno de los dos.
+async def generate_estimation(system: str, user: str) -> LLMResult:
+    """Llama al modelo con `system` y `user` ya renderizados (ver
+    app.prompts.loader.render_estimation_prompt). Este módulo no sabe nada
+    de proyectos, CAG ni templates: solo dos strings y una llamada al LLM.
     """
     cache_key = _cache_key_for(system, user)
     call_logger = logger.bind(
         requested_provider=settings.llm_provider, requested_model=settings.llm_model
     )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    return await _call_llm(messages, cache_key, call_logger)
 
+
+async def generate_conversation_turn(messages: list[dict]) -> LLMResult:
+    """Para el flujo multi-turno (POST /sessions/{id}/estimate): `messages`
+    ya viene armado por ConversationHistory.to_messages_list() -- system +
+    ventana deslizante de turnos previos + el turno nuevo.
+
+    La clave de cache se arma sobre el array completo: dos conversaciones
+    con exactamente el mismo historial cachean igual; cualquier turno
+    nuevo (historial distinto al crecer) es, por definición, un cache
+    miss -- coherente con que cada turno agrega información real.
+    """
+    cache_key = _cache_key_for_messages(messages)
+    call_logger = logger.bind(
+        requested_provider=settings.llm_provider,
+        requested_model=settings.llm_model,
+        conversation_turns=(len(messages) - 1) // 2,
+    )
+    return await _call_llm(messages, cache_key, call_logger)
+
+
+async def _call_structured(
+    messages: list[dict],
+    cache_key: str,
+    call_logger,
+    response_model: type[T],
+    max_retries: int,
+) -> StructuredLLMResult[T]:
+    """Lógica compartida de llamadas estructuradas (cache, Instructor sobre
+    el Router, logging) entre un turno único (`generate_structured`) y uno
+    multi-turno (`generate_structured_conversation_turn`)."""
     cached = await _cache.get(cache_key)
     if cached is not None:
-        call_logger.info("llm_cache_hit", streaming=True)
-        result = LLMResult(**cached)
-        yield result.estimation
-        if on_complete:
-            on_complete(result)
-        return
+        call_logger.info("llm_cache_hit", structured=True)
+        return StructuredLLMResult(
+            result=response_model.model_validate(cached["result"]),
+            model=cached["model"],
+            provider=cached["provider"],
+            input_tokens=cached["input_tokens"],
+            output_tokens=cached["output_tokens"],
+            cached=True,
+        )
 
-    router = _get_router()
-    call_logger.info("llm_call_started", cache_hit=False, streaming=True)
+    client = _get_instructor_client()
+    call_logger.info("llm_call_started", cache_hit=False, structured=True)
     start = time.perf_counter()
 
-    accumulated: list[str] = []
-    finish_reason: str | None = None
-    usage = None
-    model_name = settings.llm_model
-    actual_provider = settings.llm_provider
-
     try:
-        stream = await router.acompletion(
+        parsed, completion = await client.chat.completions.create_with_completion(
             model=PRIMARY_GROUP,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=TEMPERATURE,
+            messages=messages,
             max_tokens=MAX_OUTPUT_TOKENS,
-            stream=True,
-            stream_options={"include_usage": True},
+            temperature=TEMPERATURE,
+            response_model=response_model,
+            max_retries=max_retries,
         )
-        async for chunk in stream:
-            actual_provider = chunk._hidden_params.get("custom_llm_provider", actual_provider)
-            model_name = chunk.model or model_name
-            if chunk.choices:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    accumulated.append(delta)
-                    yield delta
-                if chunk.choices[0].finish_reason:
-                    finish_reason = chunk.choices[0].finish_reason
-            if getattr(chunk, "usage", None):
-                usage = chunk.usage
     except Exception as exc:
-        call_logger.error(
-            "llm_call_failed",
-            error_type=type(exc).__name__,
-            latency_ms=round((time.perf_counter() - start) * 1000, 1),
-        )
-        raise
+        latency_ms = round((time.perf_counter() - start) * 1000, 1)
+        # Instructor envuelve TODO en InstructorRetryException, incluidos los
+        # errores reales de proveedor (auth, rate limit, conexión) -- pero
+        # preserva el original en __cause__. Si la causa es una excepción de
+        # proveedor conocida, la re-lanzamos tal cual para que el mapeo de
+        # errores existente (CONFIGURATION_ERRORS/RATE_LIMIT_ERRORS/
+        # PROVIDER_ERRORS) la siga reconociendo sin cambios. Si no, es que el
+        # modelo agotó los reintentos sin pasar nuestros model_validator.
+        cause = exc.__cause__
+        if isinstance(cause, CONFIGURATION_ERRORS + RATE_LIMIT_ERRORS + PROVIDER_ERRORS):
+            call_logger.error(
+                "llm_call_failed",
+                error_type=type(cause).__name__,
+                latency_ms=latency_ms,
+            )
+            raise cause from exc
 
-    latency_ms = round((time.perf_counter() - start) * 1000, 1)
-
-    if finish_reason != "stop":
         call_logger.warning(
-            "llm_call_incomplete",
-            finish_reason=finish_reason,
-            actual_provider=actual_provider,
+            "llm_structured_validation_exhausted",
+            error_type=type(cause).__name__ if cause else type(exc).__name__,
             latency_ms=latency_ms,
         )
-        raise IncompleteEstimationError(f"El modelo terminó con finish_reason='{finish_reason}'")
+        raise EstimationValidationError(
+            f"El modelo no logró una respuesta válida tras los reintentos: {exc}"
+        ) from exc
 
-    result = LLMResult(
-        estimation="".join(accumulated),
-        model=model_name,
+    latency_ms = round((time.perf_counter() - start) * 1000, 1)
+    actual_provider = completion._hidden_params.get("custom_llm_provider", settings.llm_provider)
+
+    result = StructuredLLMResult(
+        result=parsed,
+        model=completion.model,
         provider=actual_provider,
-        input_tokens=usage.prompt_tokens if usage else 0,
-        output_tokens=usage.completion_tokens if usage else 0,
+        input_tokens=completion.usage.prompt_tokens,
+        output_tokens=completion.usage.completion_tokens,
     )
 
     call_logger.info(
@@ -302,8 +357,62 @@ async def stream_estimation(
         tokens_in=result.input_tokens,
         tokens_out=result.output_tokens,
         latency_ms=latency_ms,
-        streaming=True,
+        cost_usd=completion._hidden_params.get("response_cost"),
+        structured=True,
     )
-    await _cache.set(cache_key, asdict(result))
-    if on_complete:
-        on_complete(result)
+    await _cache.set(
+        cache_key,
+        {
+            "result": parsed.model_dump(mode="json"),
+            "model": result.model,
+            "provider": result.provider,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+        },
+    )
+    return result
+
+
+async def generate_structured(
+    system: str,
+    user: str,
+    response_model: type[T],
+    max_retries: int = 6,
+) -> StructuredLLMResult[T]:
+    """Turno único: `system`/`user` ya renderizados (ver
+    app.prompts.loader.render_estimation_prompt)."""
+    cache_key = build_cache_key(
+        system=system,
+        user=user,
+        model=settings.llm_model,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        response_model=response_model.__name__,
+    )
+    call_logger = logger.bind(
+        requested_provider=settings.llm_provider,
+        requested_model=settings.llm_model,
+        response_model=response_model.__name__,
+    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    return await _call_structured(messages, cache_key, call_logger, response_model, max_retries)
+
+
+async def generate_structured_conversation_turn(
+    messages: list[dict],
+    response_model: type[T],
+    max_retries: int = 6,
+) -> StructuredLLMResult[T]:
+    """Multi-turno: `messages` ya armado por
+    ConversationHistory.to_messages_list() + el turno nuevo."""
+    cache_key = _cache_key_for_messages(messages) + f":{response_model.__name__}"
+    call_logger = logger.bind(
+        requested_provider=settings.llm_provider,
+        requested_model=settings.llm_model,
+        response_model=response_model.__name__,
+        conversation_turns=(len(messages) - 1) // 2,
+    )
+    return await _call_structured(messages, cache_key, call_logger, response_model, max_retries)
