@@ -321,7 +321,14 @@ async def _amain(args: argparse.Namespace) -> int:
         print(f"  costo total USD={sum(r['cost_usd'] for r in rows):.4f}")
         print(f"  recall medio={statistics.mean(r['memory_drift_recall'] for r in rows):.3f}")
 
-    return 0 if len(rows) == total_turns else 1
+    # Éxito = el runner corrió de punta a punta y dejó un CSV usable, NO
+    # "todas las llamadas al LLM salieron bien". Un turno que falla por un
+    # error real del modelo (ej. Instructor agota reintentos de validación
+    # aritmética) es exactamente el tipo de dato que este stress-test existe
+    # para capturar -- tratarlo como "el runner falló" confundiría la señal
+    # que se está midiendo con la salud del propio script. Solo cuenta como
+    # fallo no haber podido escribir ninguna fila.
+    return 0 if rows else 1
 
 
 def main() -> int:
