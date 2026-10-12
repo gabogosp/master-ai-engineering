@@ -7,7 +7,9 @@ from app.schemas import (
     DetailLevel,
     EstimationRequest,
     EstimationResponse,
+    EstimationResult,
     OutputFormat,
+    Phase,
     ProjectType,
     ReferenceProject,
 )
@@ -79,8 +81,22 @@ def test_reference_project_rejects_empty_name_or_description():
 
 
 def test_estimation_response_round_trip():
+    result = EstimationResult(
+        summary="Resumen con suficiente longitud para pasar la validación del campo.",
+        confidence_pct=80,
+        phases=[
+            Phase(
+                name="Implementación",
+                duration_weeks=4,
+                cost_eur=10_000,
+                summary="Desarrollo del backend y frontend principal del proyecto.",
+            )
+        ],
+        total_duration_weeks=4,
+        total_cost_eur=10_000,
+    )
     response = EstimationResponse(
-        text="## Estimación\nTotal: 10 horas",
+        result=result,
         prompt_version="v1",
         model="gpt-4o-mini",
         provider="openai",
@@ -91,3 +107,4 @@ def test_estimation_response_round_trip():
     dumped = response.model_dump()
     assert dumped["prompt_version"] == "v1"
     assert dumped["input_tokens"] == 100
+    assert dumped["result"]["total_cost_eur"] == 10_000

@@ -5,12 +5,17 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
+    "instructor>=1.17.0",
     "jinja2>=3.1.6",
     "litellm>=1.83.0",
-    "openai>=3.16.2",
+    "openai<3.0.0",
     "pydantic-settings>=2.15.0",
+    "pypdf>=6.19.0",
+    "python-docx>=1.2.0",
     "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
     "redis>=8.1.0",
+    "redisvl>=0.27.2",
     "streamlit>=1.64.0",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.53.0",
@@ -25,4 +30,12 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+# Un solo event loop para toda la sesión de tests: nuestro cliente de Redis
+# (creado una vez, a nivel de módulo) abre su conexión real en el primer
+# loop que ve. Con el loop por-función por defecto, la segunda función de
+# test async reusaría esa conexión desde un loop distinto y ya cerrado
+# ("Event loop is closed") -- el mismo problema que el fixture `client` de
+# TestClient, pero del lado de pytest-asyncio en vez de Starlette.
+asyncio_default_test_loop_scope = "session"
 

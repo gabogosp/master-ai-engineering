@@ -36,4 +36,4 @@ def test_v2_keeps_output_format_and_detail_level_conditionals():
     system_detailed, _ = render_estimation_prompt(
         _request(detail_level=DetailLevel.DETAILED), version="v2"
     )
-    assert "each phase's own assumptions and risks" in system_detailed
+    assert "lists its own assumptions and risks" in system_detailed

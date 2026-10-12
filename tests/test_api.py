@@ -4,11 +4,8 @@ import httpx
 import openai
 from fastapi.testclient import TestClient
 
-from app.services.llm_service import (
-    IncompleteEstimationError,
-    LLMConfigurationError,
-    LLMResult,
-)
+from app.schemas import EstimationResult, Phase
+from app.services.llm_service import EstimationValidationError, StructuredLLMResult
 
 VALID_PAYLOAD = {
     "description": "El cliente necesita una plataforma para reservar turnos online con recordatorios por email.",
@@ -53,49 +50,66 @@ def test_estimate_validation_invalid_enum(client: TestClient):
     assert response.status_code == 422
 
 
+def _mock_estimation_result() -> EstimationResult:
+    return EstimationResult(
+        summary="Resumen de la estimación mock, con suficiente detalle para pasar la validación.",
+        confidence_pct=80,
+        phases=[
+            Phase(
+                name="Implementación",
+                duration_weeks=4,
+                cost_eur=10_000,
+                summary="Desarrollo del backend y frontend principal del proyecto.",
+            )
+        ],
+        total_duration_weeks=4,
+        total_cost_eur=10_000,
+    )
+
+
 def test_estimate_success(client: TestClient, monkeypatch):
     """Verifica la respuesta 200 ante una estimación exitosa con LLM simulado."""
-    mock_result = LLMResult(
-        estimation="## Estimación Mock\nTotal: 100 horas",
+    mock_structured = StructuredLLMResult(
+        result=_mock_estimation_result(),
         model="gpt-4o-mini-mock",
         provider="openai",
         input_tokens=500,
         output_tokens=120,
     )
 
-    mock_generate = AsyncMock(return_value=mock_result)
-    monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
+    mock_generate = AsyncMock(return_value=mock_structured)
+    monkeypatch.setattr("app.routers.estimations.generate_structured", mock_generate)
 
     response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
 
     assert response.status_code == 200
     data = response.json()
-    assert data["text"] == mock_result.estimation
+    assert data["result"]["summary"] == mock_structured.result.summary
     assert data["prompt_version"] == "v1"
-    assert data["model"] == mock_result.model
-    assert data["provider"] == mock_result.provider
+    assert data["model"] == mock_structured.model
+    assert data["provider"] == mock_structured.provider
     assert data["input_tokens"] == 500
     assert data["output_tokens"] == 120
     assert "created_at" in data
 
-    # El endpoint le pasa a generate_estimation el system/user ya renderizados,
+    # El endpoint le pasa a generate_structured el system/user ya renderizados,
     # no el request crudo.
-    (system, user), _ = mock_generate.call_args
+    (system, user, _response_model), _ = mock_generate.call_args
     assert "phases_table" in system
     assert VALID_PAYLOAD["description"] in user
 
 
 def test_estimate_with_prompt_version_query_param(client: TestClient, monkeypatch):
     """?prompt_version=v2 debe usarse para renderizar y devolverse en la respuesta."""
-    mock_result = LLMResult(
-        estimation="## Estimación v2\nTotal: 80 horas",
+    mock_structured = StructuredLLMResult(
+        result=_mock_estimation_result(),
         model="gpt-4o-mini-mock",
         provider="openai",
         input_tokens=300,
         output_tokens=90,
     )
-    mock_generate = AsyncMock(return_value=mock_result)
-    monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
+    mock_generate = AsyncMock(return_value=mock_structured)
+    monkeypatch.setattr("app.routers.estimations.generate_structured", mock_generate)
 
     response = client.post("/api/v1/estimate?prompt_version=v2", json=VALID_PAYLOAD)
 
@@ -111,19 +125,27 @@ def test_estimate_with_unknown_prompt_version(client: TestClient):
 
 
 def test_estimate_incomplete_error(client: TestClient, monkeypatch):
-    """Si el modelo corta la respuesta, debe responder 502."""
-    mock_generate = AsyncMock(side_effect=IncompleteEstimationError("Respuesta cortada"))
-    monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
+    """Si Instructor agota los reintentos sin pasar los model_validator, debe responder 502."""
+    mock_generate = AsyncMock(
+        side_effect=EstimationValidationError("El modelo no logró una respuesta válida")
+    )
+    monkeypatch.setattr("app.routers.estimations.generate_structured", mock_generate)
 
     response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 502
-    assert "incompleta" in response.json()["detail"].lower()
+    assert "no logró producir una estimación válida" in response.json()["detail"].lower()
 
 
 def test_estimate_configuration_error(client: TestClient, monkeypatch):
     """Si hay un fallo de configuración de API key o modelo, debe responder 500."""
-    mock_generate = AsyncMock(side_effect=LLMConfigurationError("API key inválida"))
-    monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
+    fake_request = httpx.Request("POST", "https://api.openai.com")
+    fake_response = httpx.Response(401, request=fake_request)
+    mock_generate = AsyncMock(
+        side_effect=openai.AuthenticationError(
+            message="API key inválida", response=fake_response, body=None
+        )
+    )
+    monkeypatch.setattr("app.routers.estimations.generate_structured", mock_generate)
 
     response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 500
@@ -139,7 +161,7 @@ def test_estimate_rate_limit_error(client: TestClient, monkeypatch):
             message="Rate limit reached", response=fake_response, body=None
         )
     )
-    monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
+    monkeypatch.setattr("app.routers.estimations.generate_structured", mock_generate)
 
     response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 503
@@ -154,7 +176,7 @@ def test_estimate_provider_api_error(client: TestClient, monkeypatch):
             message="Internal server error", request=fake_request, body=None
         )
     )
-    monkeypatch.setattr("app.routers.estimations.generate_estimation", mock_generate)
+    monkeypatch.setattr("app.routers.estimations.generate_structured", mock_generate)
 
     response = client.post("/api/v1/estimate", json=VALID_PAYLOAD)
     assert response.status_code == 502
