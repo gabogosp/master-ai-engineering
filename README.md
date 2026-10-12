@@ -53,6 +53,7 @@ Las variables se leen del archivo `.env`. Cualquier variable que falte usa su va
 | `CACHE_TTL_SECONDS` | TTL de las entradas en cache exact-match | `86400` (24h) |
 | `BACKEND_URL` | URL del servicio IA que consume el cliente Streamlit | `http://localhost:8000` |
 | `MAX_CONVERSATION_TURNS` | Ventana deslizante del historial conversacional | `6` |
+| `MAX_ATTACHMENT_CHARS` | Tope duro de caracteres por adjunto extraído | `60000` |
 | `EMBEDDING_MODEL` | Modelo de embeddings para la cache semántica | `text-embedding-3-small` |
 | `SEMANTIC_CACHE_THRESHOLD` | Similitud de coseno mínima para servir un hit (0–1) | `0.85` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | TTL de las entradas en cache semántica | `86400` (24h) |
@@ -276,6 +277,8 @@ La respuesta es el mismo `EstimationResponse` del endpoint de formulario, con do
 
 Se eligió **extracción local** (`pypdf` para PDF, `python-docx` para Word) en vez de subir el archivo directo a la Files API de un proveedor (Camino A). Razón: el wrapper de LLM (`llm_service.py`) es agnóstico de proveedor — el Router de LiteLLM hace fallback automático entre OpenAI y Anthropic. Atar un adjunto a la Files API de un proveedor específico rompería esa propiedad justo para las peticiones con adjuntos. Extraer el texto localmente (`app/attachments.py`) mantiene el fallback intacto en todos los casos. El texto de cada adjunto se concatena al transcript con un separador `--- attachment: <filename> ---`, y el guardrail de input corre sobre el transcript YA CON los adjuntos concatenados — un PDF también puede traer PII o un intento de prompt-injection.
 
+**Tope duro por adjunto** (`MAX_ATTACHMENT_CHARS`, 60.000 caracteres por defecto): protege la ventana de contexto de un PDF enorme. Si el texto extraído lo supera, se corta (`text[:max_chars]`) y queda un log `attachment_truncated` con el tamaño original y el que quedó. Es un corte simple a propósito — el chunking de verdad (partir el adjunto en pedazos relevantes en vez de cortar a lo bruto) entra con RAG en el módulo 3.
+
 ### Decisión: extracción de `project_metadata` — LLM extractor
 
 Después de cada turno, una **segunda llamada al LLM** (prompt propio en `app/prompts/metadata_extraction/v1/`, en texto libre — no pasa por Instructor) extrae en JSON qué se aprendió del turno, y se fusiona sobre lo que ya se sabía (`ProjectMetadata.merge`, en `app/sessions.py`). Se eligió esto en vez de una heurística con regex porque el texto es libre y en español, con redacción variable turno a turno. Si el LLM devuelve algo que no parsea como JSON, se degrada a **no actualizar nada** en vez de romper la petición.
@@ -359,8 +362,9 @@ En construcción, bloque a bloque, sobre la consigna de sesión 6 ("instrumentá
   - `growing` — el proyecto acumula requisitos sin parar; estresa si el nombre del proyecto (turno 1) sobrevive hasta el turno 20 como ancla o dentro del resumen.
   - `pivot` — el turno 5 cambia el stack (React Native → Flutter); prueba si `mentioned_technologies` acumula ambas tecnologías (comportamiento esperado) o pierde la primera (drift).
   - `contradiction` — el turno 3 fija un presupuesto, el turno 8 lo contradice; prueba cuál de los dos sobrevive en la metadata (debería ganar el más reciente).
+- **`evals/stress/fixtures/build_pdfs.py`**: genera 4 PDFs sintéticos calibrados por tamaño de *texto extraído* (5/20/50/100 KB), no por peso de archivo — se relee cada uno con el mismo `pypdf` que usa `app.attachments.extract_text` en producción, para calibrar contra el extractor real y no contra lo que fpdf2 escribió. Determinístico y gitignoreado: se regenera con `uv run python -m evals.stress.fixtures.build_pdfs`. El de 100 KB es, a propósito, el que supera `MAX_ATTACHMENT_CHARS` (60.000) — sirve para medir el truncado en la curva de adjuntos grandes.
 
-Lo que falta (bloques siguientes, no construido todavía): el runner que efectivamente dispara estos escenarios contra sesiones reales en N ∈ {1, 3, 6, 10, 20} turnos, las métricas de stress (`MemoryDriftMetric`, `LatencyBudgetMetric`...) que leen el fact-tracker contra el snapshot de sesión, y el propio `REPORT.md`/`results.csv`.
+Lo que falta (bloques siguientes, no construido todavía): el runner que efectivamente dispara estos escenarios/PDFs contra sesiones reales en N ∈ {1, 3, 6, 10, 20} turnos y los 5 tamaños de adjunto, las métricas de stress (`MemoryDriftMetric`, `LatencyBudgetMetric`...) que leen el fact-tracker y las curvas contra el snapshot de sesión, y el propio `REPORT.md`/`results.csv`.
 
 ## Estructura
 
@@ -374,10 +378,13 @@ master-ai-engineering/
 │   ├── metrics.py                # SchemaAdherenceMetric, CostBoundsMetric, ContentRecallMetric
 │   ├── run.py                     # CLI: uv run python -m evals.run --mode actor|acb
 │   └── stress/
-│       └── scenarios.py           # 3 perfiles multi-turno (growing/pivot/contradiction) para el stress-test de sesión 6
+│       ├── scenarios.py           # 3 perfiles multi-turno (growing/pivot/contradiction) para el stress-test de sesión 6
+│       └── fixtures/
+│           └── build_pdfs.py      # Genera 4 PDFs calibrados (5/20/50/100 KB de texto extraído) -- gitignoreados, se regeneran
 ├── tests/
 │   ├── conftest.py
 │   ├── test_api.py              # Endpoints, códigos de error, prompt_version
+│   ├── test_attachments.py      # Truncado al tope MAX_ATTACHMENT_CHARS
 │   ├── test_cache.py            # Clave de cache exact-match
 │   ├── test_semantic_cache.py   # Bucket, hit/miss por similitud, log_only (Redis Stack real + vectorizer fake)
 │   ├── test_config.py           # Settings
@@ -390,6 +397,7 @@ master-ai-engineering/
 │   ├── test_boss.py             # Máquina de estados Actor-Critic-Boss
 │   ├── test_evals.py            # Dataset dorado + métricas del framework de evals
 │   ├── test_stress_scenarios.py # Los 3 perfiles de evals/stress/scenarios.py
+│   ├── test_build_pdfs.py       # Generación de PDFs calibrados
 │   ├── test_stream_and_ui.py    # Streamlit vía AppTest (mock de httpx)
 │   └── prompts/
 │       ├── test_estimation_v1.py

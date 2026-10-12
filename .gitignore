@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# PDFs sintéticos del stress-test (evals/stress/fixtures/build_pdfs.py):
+# determinísticos, se regeneran con `uv run python -m evals.stress.fixtures.build_pdfs`.
+evals/stress/fixtures/*.pdf

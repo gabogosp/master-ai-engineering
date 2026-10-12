@@ -5,6 +5,8 @@ from docx import Document
 from fastapi import UploadFile
 from pypdf import PdfReader
 
+from app.config import settings
+
 logger = structlog.get_logger(__name__)
 
 
@@ -42,6 +44,16 @@ async def extract_text(upload_file: UploadFile) -> str:
     else:
         raise UnsupportedAttachmentError(
             f"Formato no soportado: '{filename}'. Solo se aceptan .pdf y .docx."
+        )
+
+    original_chars = len(text)
+    if original_chars > settings.max_attachment_chars:
+        text = text[: settings.max_attachment_chars]
+        logger.info(
+            "attachment_truncated",
+            filename=filename,
+            original_chars=original_chars,
+            kept_chars=len(text),
         )
 
     logger.info("attachment_extracted", filename=filename, chars=len(text))

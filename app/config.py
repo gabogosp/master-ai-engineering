@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 86400
     backend_url: str = "http://localhost:8000"
     max_conversation_turns: int = 6
+    # Tope duro por adjunto extraído (en caracteres), para proteger la
+    # ventana de contexto -- sin esto, un PDF enorme se manda entero al
+    # LLM. El chunking de verdad entra en el módulo 3; esto es un corte
+    # simple por ahora.
+    max_attachment_chars: int = 60_000
 
     # --- Cache semántica (requiere redis/redis-stack, no redis:7-alpine) ---
     embedding_model: str = "text-embedding-3-small"
