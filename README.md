@@ -350,6 +350,18 @@ El dataset cubre deliberadamente los bordes: casos out-of-scope (vago y adversar
 
 Un README específico de evals no existe a propósito: todo el diseño vive en los docstrings de `evals/dataset.py`, `evals/metrics.py` y `evals/run.py`.
 
+### Stress-test del CAG (`evals/stress/`)
+
+En construcción, bloque a bloque, sobre la consigna de sesión 6 ("instrumentá tu CAG antes de ver RAG en el directo"). Hasta ahora:
+
+- **`turn_observed`** (ver sección Actor-Critic-Boss más arriba): el evento unificado por turno que alimenta el futuro `results.csv`.
+- **`evals/stress/scenarios.py`**: tres perfiles de conversación sintética, cada uno con al menos 20 turnos guionados y un *fact-tracker* por turno (qué hecho debería sobrevivir en llamadas posteriores):
+  - `growing` — el proyecto acumula requisitos sin parar; estresa si el nombre del proyecto (turno 1) sobrevive hasta el turno 20 como ancla o dentro del resumen.
+  - `pivot` — el turno 5 cambia el stack (React Native → Flutter); prueba si `mentioned_technologies` acumula ambas tecnologías (comportamiento esperado) o pierde la primera (drift).
+  - `contradiction` — el turno 3 fija un presupuesto, el turno 8 lo contradice; prueba cuál de los dos sobrevive en la metadata (debería ganar el más reciente).
+
+Lo que falta (bloques siguientes, no construido todavía): el runner que efectivamente dispara estos escenarios contra sesiones reales en N ∈ {1, 3, 6, 10, 20} turnos, las métricas de stress (`MemoryDriftMetric`, `LatencyBudgetMetric`...) que leen el fact-tracker contra el snapshot de sesión, y el propio `REPORT.md`/`results.csv`.
+
 ## Estructura
 
 ```
@@ -360,20 +372,24 @@ master-ai-engineering/
 │   ├── dataset.py                # GoldenCase + load_dataset()
 │   ├── golden_dataset.json       # 16 casos dorados
 │   ├── metrics.py                # SchemaAdherenceMetric, CostBoundsMetric, ContentRecallMetric
-│   └── run.py                     # CLI: uv run python -m evals.run --mode actor|acb
+│   ├── run.py                     # CLI: uv run python -m evals.run --mode actor|acb
+│   └── stress/
+│       └── scenarios.py           # 3 perfiles multi-turno (growing/pivot/contradiction) para el stress-test de sesión 6
 ├── tests/
 │   ├── conftest.py
 │   ├── test_api.py              # Endpoints, códigos de error, prompt_version
 │   ├── test_cache.py            # Clave de cache exact-match
 │   ├── test_semantic_cache.py   # Bucket, hit/miss por similitud, log_only (Redis Stack real + vectorizer fake)
 │   ├── test_config.py           # Settings
+│   ├── test_llm_service.py      # latency_ms/cost_usd del wrapper (frescos y en cache hit)
 │   ├── test_schemas.py          # Validación Pydantic de los schemas (incluido EstimationResult, CriticFeedback)
 │   ├── test_sessions.py         # ConversationHistory, ProjectMetadata (unitarios)
-│   ├── test_sessions_integration.py  # Sesiones end-to-end (httpx.AsyncClient), incluido ACB
+│   ├── test_sessions_integration.py  # Sesiones end-to-end (httpx.AsyncClient), incluido ACB y turn_observed
 │   ├── test_tier_resolver.py    # Cadena de reglas del tier dinámico
 │   ├── test_compression.py      # Detección de anclas, política de compresión
 │   ├── test_boss.py             # Máquina de estados Actor-Critic-Boss
 │   ├── test_evals.py            # Dataset dorado + métricas del framework de evals
+│   ├── test_stress_scenarios.py # Los 3 perfiles de evals/stress/scenarios.py
 │   ├── test_stream_and_ui.py    # Streamlit vía AppTest (mock de httpx)
 │   └── prompts/
 │       ├── test_estimation_v1.py
