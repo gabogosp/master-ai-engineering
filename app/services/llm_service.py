@@ -77,6 +77,10 @@ class LLMResult:
     provider: str
     input_tokens: int
     output_tokens: int
+    # En un cache hit no hubo llamada real: latency_ms=0.0 y cost_usd=0.0
+    # reflejan eso, no lo que costó/tardó la llamada original que se cacheó.
+    latency_ms: float = 0.0
+    cost_usd: float | None = None
 
 
 @dataclass
@@ -87,6 +91,8 @@ class StructuredLLMResult(Generic[T]):
     input_tokens: int
     output_tokens: int
     cached: bool = False
+    latency_ms: float = 0.0
+    cost_usd: float | None = None
 
 
 def _api_key_for(provider: str) -> str | None:
@@ -209,7 +215,7 @@ async def _call_llm(messages: list[dict], cache_key: str, call_logger) -> LLMRes
     cached = await _cache.get(cache_key)
     if cached is not None:
         call_logger.info("llm_cache_hit")
-        return LLMResult(**cached)
+        return LLMResult(**{**cached, "latency_ms": 0.0, "cost_usd": 0.0})
 
     router = _get_router()
     call_logger.info("llm_call_started", cache_hit=False)
@@ -251,6 +257,8 @@ async def _call_llm(messages: list[dict], cache_key: str, call_logger) -> LLMRes
         provider=actual_provider,
         input_tokens=response.usage.prompt_tokens,
         output_tokens=response.usage.completion_tokens,
+        latency_ms=latency_ms,
+        cost_usd=response._hidden_params.get("response_cost"),
     )
 
     call_logger.info(
@@ -260,7 +268,7 @@ async def _call_llm(messages: list[dict], cache_key: str, call_logger) -> LLMRes
         tokens_in=result.input_tokens,
         tokens_out=result.output_tokens,
         latency_ms=latency_ms,
-        cost_usd=response._hidden_params.get("response_cost"),
+        cost_usd=result.cost_usd,
     )
     await _cache.set(cache_key, asdict(result))
     return result
@@ -322,6 +330,8 @@ async def _call_structured(
             input_tokens=cached["input_tokens"],
             output_tokens=cached["output_tokens"],
             cached=True,
+            latency_ms=0.0,
+            cost_usd=0.0,
         )
 
     client = _get_instructor_client()
@@ -373,6 +383,8 @@ async def _call_structured(
         provider=actual_provider,
         input_tokens=completion.usage.prompt_tokens,
         output_tokens=completion.usage.completion_tokens,
+        latency_ms=latency_ms,
+        cost_usd=completion._hidden_params.get("response_cost"),
     )
 
     call_logger.info(
@@ -382,7 +394,7 @@ async def _call_structured(
         tokens_in=result.input_tokens,
         tokens_out=result.output_tokens,
         latency_ms=latency_ms,
-        cost_usd=completion._hidden_params.get("response_cost"),
+        cost_usd=result.cost_usd,
         structured=True,
     )
     await _cache.set(

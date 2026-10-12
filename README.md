@@ -406,7 +406,7 @@ master-ai-engineering/
 │   │   ├── estimations.py         # POST /estimate (guardrails + cache semántica + Instructor)
 │   │   └── sessions.py            # POST /sessions, /estimate, /estimate-acb, GET /sessions/{id}
 │   └── services/
-│       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache exact-match, Instructor, multi-turno, grupo auxiliar
+│       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache exact-match, Instructor, multi-turno, grupo auxiliar. Cada llamada devuelve model/provider/tokens/latency_ms/cost_usd (0.0 en cache hit)
 │       ├── openai_client.py       # Cliente OpenAI compartido (moderación, embeddings)
 │       ├── semantic_cache.py      # Cache semántica: redisvl + Redis Stack
 │       ├── metadata_extraction.py # Segunda llamada al LLM que extrae project_metadata
