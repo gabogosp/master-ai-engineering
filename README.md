@@ -357,14 +357,17 @@ Un README específico de evals no existe a propósito: todo el diseño vive en l
 
 En construcción, bloque a bloque, sobre la consigna de sesión 6 ("instrumentá tu CAG antes de ver RAG en el directo"). Hasta ahora:
 
-- **`turn_observed`** (ver sección Actor-Critic-Boss más arriba): el evento unificado por turno que alimenta el futuro `results.csv`.
+- **`turn_observed`**: el evento unificado por turno que alimenta el futuro `results.csv`. Desde el Bloque 4 ya no es solo un log: se construye como un objeto típado `TurnObservation` (Pydantic, `app/schemas.py`) que `EstimationService` loguea (`logger.info("turn_observed", **observation.model_dump())`) Y adjunta a la respuesta HTTP (`EstimationResponse.observation`, heredado por `ACBResponse`) — así el futuro runner de stress lo lee directo del JSON de la respuesta, sin tener que parsear logs con `capture_logs`.
 - **`evals/stress/scenarios.py`**: tres perfiles de conversación sintética, cada uno con al menos 20 turnos guionados y un *fact-tracker* por turno (qué hecho debería sobrevivir en llamadas posteriores):
   - `growing` — el proyecto acumula requisitos sin parar; estresa si el nombre del proyecto (turno 1) sobrevive hasta el turno 20 como ancla o dentro del resumen.
   - `pivot` — el turno 5 cambia el stack (React Native → Flutter); prueba si `mentioned_technologies` acumula ambas tecnologías (comportamiento esperado) o pierde la primera (drift).
   - `contradiction` — el turno 3 fija un presupuesto, el turno 8 lo contradice; prueba cuál de los dos sobrevive en la metadata (debería ganar el más reciente).
 - **`evals/stress/fixtures/build_pdfs.py`**: genera 4 PDFs sintéticos calibrados por tamaño de *texto extraído* (5/20/50/100 KB), no por peso de archivo — se relee cada uno con el mismo `pypdf` que usa `app.attachments.extract_text` en producción, para calibrar contra el extractor real y no contra lo que fpdf2 escribió. Determinístico y gitignoreado: se regenera con `uv run python -m evals.stress.fixtures.build_pdfs`. El de 100 KB es, a propósito, el que supera `MAX_ATTACHMENT_CHARS` (60.000) — sirve para medir el truncado en la curva de adjuntos grandes.
+- **`evals/stress/metrics.py`**: tres métricas nuevas, en un módulo separado de `evals/metrics.py` porque operan sobre otro shape (`TurnObservation`/snapshot de sesión, no `(GoldenCase, EstimationResult)`) aunque reusan el mismo `MetricResult`:
+  - `LatencyBudgetMetric(budget_ms)` / `CostBudgetMetric(budget_usd)` — evalúan un `TurnObservation` contra un presupuesto fijo.
+  - `MemoryDriftMetric(fact, fact_field)` — evalúa el snapshot de `GET /sessions/{id}` buscando si un hecho sigue siendo recuperable (substring case-insensitive) en `metadata.project_name`/`mentioned_technologies`/`agreed_scope`, en `summary` (texto del resumen acumulado — campo agregado a `SessionInfoResponse` en este bloque, antes solo exponía `summary_chars`), o en el snapshot completo (`fact_field="any"`).
 
-Lo que falta (bloques siguientes, no construido todavía): el runner que efectivamente dispara estos escenarios/PDFs contra sesiones reales en N ∈ {1, 3, 6, 10, 20} turnos y los 5 tamaños de adjunto, las métricas de stress (`MemoryDriftMetric`, `LatencyBudgetMetric`...) que leen el fact-tracker y las curvas contra el snapshot de sesión, y el propio `REPORT.md`/`results.csv`.
+Lo que falta (bloques siguientes, no construido todavía): el runner que efectivamente dispara estos escenarios/PDFs contra sesiones reales en N ∈ {1, 3, 6, 10, 20} turnos y los 5 tamaños de adjunto, y el propio `REPORT.md`/`results.csv`.
 
 ## Estructura
 
@@ -398,6 +401,7 @@ master-ai-engineering/
 │   ├── test_evals.py            # Dataset dorado + métricas del framework de evals
 │   ├── test_stress_scenarios.py # Los 3 perfiles de evals/stress/scenarios.py
 │   ├── test_build_pdfs.py       # Generación de PDFs calibrados
+│   ├── test_stress_metrics.py   # LatencyBudgetMetric, CostBudgetMetric, MemoryDriftMetric
 │   ├── test_stream_and_ui.py    # Streamlit vía AppTest (mock de httpx)
 │   └── prompts/
 │       ├── test_estimation_v1.py

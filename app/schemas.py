@@ -58,6 +58,10 @@ class SessionInfoResponse(BaseModel):
     metadata: dict
     anchors_count: int = 0
     summary_chars: int = 0
+    # Texto del resumen acumulado, no solo su longitud -- lo necesita
+    # MemoryDriftMetric (evals/stress/metrics.py, fact_field="summary") para
+    # buscar un hecho dentro del resumen comprimido, no solo contarlo.
+    summary: str | None = None
     last_resolved_tier: str | None = None
     last_tier_rule: str | None = None
 
@@ -124,6 +128,35 @@ class EstimationResult(BaseModel):
         return self
 
 
+class TurnObservation(BaseModel):
+    """Telemetría unificada de un turno conversacional (sesión 6, Bloque
+    1/4 de evals/stress). Se construye una sola vez en EstimationService,
+    se loguea (`logger.info("turn_observed", **observation.model_dump())`)
+    Y se adjunta a la respuesta -- el runner de stress la lee directo del
+    JSON, sin tener que parsear logs con `capture_logs`.
+
+    `cache_hit_kind` sí puede valer "exact" acá (a diferencia de un diseño
+    que lo deje fijo en "none"): nuestro flujo conversacional SÍ pasa por
+    la cache exact-match (la semántica es la única que está excluida, ver
+    sección "Cache semántica" del README) -- hardcodear "none" sería
+    inexacto para este sistema en particular.
+    """
+
+    turn_index: int = Field(ge=1)
+    session_id: str
+    enriched_transcript_chars: int = Field(ge=0)
+    attachments_total_chars: int = Field(ge=0)
+    messages_in_window: int = Field(ge=0)
+    anchors_count: int = Field(ge=0)
+    summary_chars: int = Field(ge=0)
+    tokens_in: int = Field(ge=0)
+    tokens_out: int = Field(ge=0)
+    cost_usd: float = Field(ge=0)
+    latency_ms: float = Field(ge=0)
+    cache_hit_kind: Literal["none", "exact", "semantic"] = "none"
+    last_resolved_tier: str | None = None
+
+
 class EstimationResponse(BaseModel):
     result: EstimationResult
     prompt_version: str
@@ -137,6 +170,7 @@ class EstimationResponse(BaseModel):
     # el endpoint de formulario de un solo turno los deja en None.
     project_metadata: dict | None = None
     history_turns: int | None = None
+    observation: TurnObservation | None = None
 
 
 # --- Actor-Critic-Boss (POST /sessions/{id}/estimate-acb) -------------------

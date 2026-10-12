@@ -42,12 +42,7 @@ from dataclasses import dataclass, field
 from typing import Literal, NamedTuple
 
 from app.schemas import DetailLevel, OutputFormat, ProjectType
-
-# Vive acá por ahora (Bloque 2 solo pide scenarios.py); cuando el Bloque 4
-# construya evals/stress/metrics.py con MemoryDriftMetric, este tipo se
-# muda para allá y scenarios.py pasa a importarlo -- es el consumidor
-# natural del vocabulario de "en qué campo buscar el hecho".
-FactField = Literal["project_name", "technologies", "scope", "summary", "any"]
+from evals.stress.metrics import FactField
 
 
 class ScenarioTurn(NamedTuple):

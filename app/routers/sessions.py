@@ -131,6 +131,7 @@ async def get_session(session_id: str) -> SessionInfoResponse:
         metadata=session.metadata.model_dump(),
         anchors_count=len(session.history.anchors) // 2,
         summary_chars=len(session.history.summary or ""),
+        summary=session.history.summary,
         last_resolved_tier=session.last_resolved_tier,
         last_tier_rule=session.last_tier_rule,
     )

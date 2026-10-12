@@ -43,6 +43,7 @@ from app.schemas import (
     EstimationResult,
     OutputFormat,
     ProjectType,
+    TurnObservation,
 )
 from app.services.llm_service import StructuredLLMResult, generate_structured_conversation_turn
 from app.services.metadata_extraction import extract_and_merge_metadata
@@ -88,7 +89,7 @@ class EstimationService:
 
         assistant_turn = result.model_dump_json()
         await self._persist_turn(session, full_transcript, user, assistant_turn)
-        self._log_turn_observed(session, full_transcript, attachments_total_chars, structured)
+        observation = self._log_turn_observed(session, full_transcript, attachments_total_chars, structured)
 
         return EstimationResponse(
             result=result,
@@ -101,6 +102,7 @@ class EstimationService:
             cached=structured.cached,
             project_metadata=session.metadata.model_dump(),
             history_turns=len(session.history),
+            observation=observation,
         )
 
     async def estimate_with_acb(
@@ -158,7 +160,9 @@ class EstimationService:
         )
         assistant_turn = final_result.model_dump_json()
         await self._persist_turn(session, full_transcript, canonical_user, assistant_turn)
-        self._log_turn_observed(session, full_transcript, attachments_total_chars, last_structured)
+        observation = self._log_turn_observed(
+            session, full_transcript, attachments_total_chars, last_structured
+        )
 
         return ACBResponse(
             result=final_result,
@@ -171,6 +175,7 @@ class EstimationService:
             cached=last_structured.cached,
             project_metadata=session.metadata.model_dump(),
             history_turns=len(session.history),
+            observation=observation,
             acb=trace,
         )
 
@@ -213,13 +218,18 @@ class EstimationService:
         full_transcript: str,
         attachments_total_chars: int,
         structured: StructuredLLMResult,
-    ) -> None:
-        """Un único evento agregado por turno (Bloque 1 / Paso 1 de la
+    ) -> TurnObservation:
+        """Construye el evento agregado por turno (Bloque 1 / Paso 1 de la
         consigna de sesión 6), en vez de los logs sueltos que ya emiten
         llm_service/compression/metadata_extraction a lo largo del camino:
         para extraer evals/stress/results.csv de una corrida de
         stress-testing, un evento = una fila es mucho más simple que
         reconciliar logs separados por timestamp y session_id.
+
+        Se loguea Y se devuelve (Bloque 4): el llamador la adjunta a la
+        respuesta HTTP (`EstimationResponse.observation`) para que el
+        runner de stress-test la lea directo del JSON, sin tener que
+        parsear logs con `capture_logs`.
 
         Compartido entre estimate_conversational y estimate_with_acb --
         antes de este refactor, ACB no emitía turn_observed porque la
@@ -232,8 +242,7 @@ class EstimationService:
         flujo conversacional (ver sección "Cache semántica" del README).
         """
         session.turn_index += 1
-        logger.info(
-            "turn_observed",
+        observation = TurnObservation(
             turn_index=session.turn_index,
             session_id=session.session_id,
             enriched_transcript_chars=len(full_transcript),
@@ -248,6 +257,8 @@ class EstimationService:
             cache_hit_kind="exact" if structured.cached else "none",
             last_resolved_tier=session.last_resolved_tier,
         )
+        logger.info("turn_observed", **observation.model_dump())
+        return observation
 
 
 estimation_service = EstimationService()
