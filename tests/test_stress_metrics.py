@@ -83,6 +83,7 @@ def _snapshot(**overrides) -> dict:
         anchors_count=1,
         summary_chars=120,
         summary="El proyecto MediFlow es una app de agenda para clínicas.",
+        anchors=[],
         last_resolved_tier=None,
         last_tier_rule=None,
     )
@@ -116,4 +117,14 @@ def test_memory_drift_metric_boundary_any_field_finds_fact_outside_its_declared_
 def test_memory_drift_metric_technologies_field_joins_list_before_searching():
     metric = MemoryDriftMetric(fact="flutter", fact_field="technologies")
     result = metric.evaluate(_snapshot())
+    assert result.passed
+
+
+def test_memory_drift_metric_any_field_finds_a_fact_that_only_survives_in_an_anchor():
+    """Un hecho puede sobrevivir SOLO como ancla (ni en el resumen ni en
+    metadata) -- fact_field="any" tiene que verlo porque el snapshot
+    incluye el texto de las anclas, no solo su conteo."""
+    snapshot = _snapshot(anchors=["Presupuesto cerrado: 55000 EUR, firmado el 10/10."])
+    metric = MemoryDriftMetric(fact="55000", fact_field="any")
+    result = metric.evaluate(snapshot)
     assert result.passed

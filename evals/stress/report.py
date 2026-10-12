@@ -43,6 +43,7 @@ def _read_rows(path: Path) -> list[dict[str, Any]]:
         row["turn_index"] = int(row["turn_index"])
         row["attachment_kb"] = int(row["attachment_kb"])
         row["repeat"] = int(row["repeat"])
+        row["anchors_count"] = int(row["anchors_count"])
         row["latency_ms"] = float(row["latency_ms"])
         row["cost_usd"] = float(row["cost_usd"])
         row["cost_usd_cumulative"] = float(row["cost_usd_cumulative"])
@@ -224,6 +225,18 @@ def _reading_paragraphs(rows: list[dict[str, Any]], total_conversations: int | N
 
     total_convos, complete_convos, complete_rate = _completion_stats(rows, total_conversations)
 
+    anchor_caveat = ""
+    if all(row["anchors_count"] == 0 for row in rows):
+        anchor_caveat = (
+            f" Importante para leer este número: `anchors_count` fue 0 en las {len(rows)} filas "
+            "de esta corrida -- el detector heurístico de anclas (`app/compression/anchors.py`) nunca "
+            "disparó, porque sus patrones buscan frases específicas (NDA, contrato firmado, "
+            "presupuesto cerrado, deadline duro...) que el contenido guionado de los tres "
+            "escenarios no usa textualmente. En los hechos, esta corrida mide la retención del "
+            "SUMMARIZER solo, no del mecanismo de anclas -- un corpus de escenarios que dispare "
+            "el heurístico daría una curva de recall distinta, probablemente mejor."
+        )
+
     if breaking_turn is not None:
         drift_sentence = (
             f"El recall medio del fact-tracker cae por debajo de 0.8 a partir del turno "
@@ -231,14 +244,14 @@ def _reading_paragraphs(rows: list[dict[str, Any]], total_conversations: int | N
             f"{recall_n:.2f} en el turno {max_n}, una caída de {recall_drop_pct:.0f} puntos). "
             "Ese es, en los datos de esta corrida, el punto en el que la ventana deslizante "
             "y el resumen acumulativo empiezan a perder hechos más rápido de lo que los "
-            "retienen."
+            f"retienen.{anchor_caveat}"
         )
     else:
         drift_sentence = (
             f"El recall medio del fact-tracker se mantiene por encima de 0.8 en los {max_n} "
             f"turnos (de {recall_1:.2f} en el turno 1 a {recall_n:.2f} en el turno {max_n}): en "
             "esta corrida, el mecanismo de anclas + resumen acumulativo alcanza para no perder "
-            "los hechos trackeados dentro de la ventana de 20 turnos probada."
+            f"los hechos trackeados dentro de la ventana de 20 turnos probada.{anchor_caveat}"
         )
 
     if cost_growth >= latency_growth and cost_growth >= 1.5:

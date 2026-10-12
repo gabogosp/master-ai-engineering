@@ -77,6 +77,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.schemas import TurnObservation
+from evals.stress.fixtures.build_pdfs import _build_pdf
 from evals.stress.metrics import CostBudgetMetric, FactField, LatencyBudgetMetric, MemoryDriftMetric
 from evals.stress.scenarios import Scenario, ScenarioTurn, get_scenario
 
@@ -110,15 +111,19 @@ FIELDNAMES = [
 
 def _attachment_path_for(attachment_kb: int) -> Path | None:
     """0 KB = no adjuntar nada (igual que `build_pdfs.py`: no genera un
-    archivo de 0 KB, directamente no hay archivo que adjuntar)."""
+    archivo de 0 KB, directamente no hay archivo que adjuntar).
+
+    Los fixtures son gitignoreados (ver evals/stress/fixtures/build_pdfs.py
+    y .gitignore) -- la consigna pide explícitamente "comitea el script y
+    deja que el runner los regenere, son determinísticos", así que si el
+    PDF no está en disco se genera acá mismo en vez de fallar pidiéndole
+    al usuario que corra otro comando a mano."""
     if attachment_kb == 0:
         return None
     path = FIXTURES_DIR / f"attach_{attachment_kb}kb.pdf"
     if not path.exists():
-        raise FileNotFoundError(
-            f"falta {path.name} -- generalo con "
-            "`uv run python -m evals.stress.fixtures.build_pdfs`"
-        )
+        FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
+        _build_pdf(attachment_kb, path)
     return path
 
 

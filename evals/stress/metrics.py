@@ -85,11 +85,11 @@ class MemoryDriftMetric:
     - "scope"         -- snapshot["metadata"]["agreed_scope"]
     - "summary"       -- snapshot["summary"] (el resumen acumulado; texto,
                           no `summary_chars`)
-    - "any"           -- todo el snapshot serializado a JSON -- para
-                          hechos que podrían sobrevivir en más de un lugar
-                          (ej. en una ancla del historial, que no tiene
-                          campo propio en el snapshot) y no vale la pena
-                          acotar.
+    - "any"           -- todo el snapshot serializado a JSON, incluido
+                          `snapshot["anchors"]` (el texto de los mensajes
+                          promovidos a ancla, no solo `anchors_count`) --
+                          para hechos que podrían sobrevivir en más de un
+                          lugar y no vale la pena acotar.
 
     Búsqueda case-insensitive por substring -- no es NLP, es un detector
     de regresión burdo pero barato: si el hecho ni siquiera aparece como

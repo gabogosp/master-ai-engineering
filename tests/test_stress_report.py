@@ -83,3 +83,13 @@ def test_failure_hotspot_finds_the_turn_where_most_broken_conversations_stop():
 def test_failure_hotspot_is_none_when_everyone_completes():
     rows = [_row(session_id="a", turn_index=20), _row(session_id="b", turn_index=20)]
     assert _failure_hotspot(rows) is None
+
+
+def test_report_flags_when_anchors_never_fired():
+    report = build_report([_row(anchors_count=0)])
+    assert "anchors_count` fue 0" in report
+
+
+def test_report_omits_anchor_caveat_when_anchors_did_fire():
+    report = build_report([_row(anchors_count=1)])
+    assert "anchors_count` fue 0" not in report

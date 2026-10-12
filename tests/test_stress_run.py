@@ -34,9 +34,18 @@ def test_attachment_path_for_known_size_points_at_fixture():
     assert path == FIXTURES_DIR / "attach_20kb.pdf"
 
 
-def test_attachment_path_for_unknown_size_raises_with_a_helpful_hint():
-    with pytest.raises(FileNotFoundError, match="build_pdfs"):
-        _attachment_path_for(9999)
+def test_attachment_path_for_missing_fixture_generates_it_on_demand():
+    """La consigna pide "comitea el script y deja que el runner los
+    regenere" -- un tamaño sin PDF en disco no debe fallar, debe
+    generarlo ahí mismo (son determinísticos, ver build_pdfs.py)."""
+    path = FIXTURES_DIR / "attach_1kb.pdf"
+    path.unlink(missing_ok=True)
+    try:
+        result = _attachment_path_for(1)
+        assert result == path
+        assert path.exists()
+    finally:
+        path.unlink(missing_ok=True)
 
 
 # --- _percentile ----------------------------------------------------------

@@ -62,6 +62,12 @@ class SessionInfoResponse(BaseModel):
     # MemoryDriftMetric (evals/stress/metrics.py, fact_field="summary") para
     # buscar un hecho dentro del resumen comprimido, no solo contarlo.
     summary: str | None = None
+    # Texto de los mensajes promovidos a ancla, no solo `anchors_count` --
+    # un hecho declarado en sesión 6 (Bloque 2) puede sobrevivir SOLO
+    # dentro de un ancla (ni en el resumen ni en metadata), y
+    # MemoryDriftMetric con fact_field="any" solo puede verlo si el texto
+    # de la ancla efectivamente viaja en este snapshot.
+    anchors: list[str] = Field(default_factory=list)
     last_resolved_tier: str | None = None
     last_tier_rule: str | None = None
 
