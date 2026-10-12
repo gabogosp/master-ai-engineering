@@ -94,7 +94,7 @@ _GROWING_TURNS: list[ScenarioTurn] = [
         "salud. Stack: React + Postgres. Equipo de 3 personas. Alcance "
         "inicial: agenda de turnos, historia clínica básica, panel de "
         "recepción.",
-        "nombre del proyecto: MediFlow",
+        "MediFlow",
         "project_name",
     ),
     ScenarioTurn(
@@ -224,7 +224,7 @@ _PIVOT_TURNS: list[ScenarioTurn] = [
         "Necesitamos una app para los socios de una cadena de gimnasios, "
         "se llama FitPulse. Mobile nativo con React Native para iOS y "
         "Android. Equipo de 4.",
-        "nombre del proyecto: FitPulse",
+        "FitPulse",
         "project_name",
     ),
     ScenarioTurn(
@@ -350,7 +350,7 @@ _CONTRADICTION_TURNS: list[ScenarioTurn] = [
         "Necesitamos una herramienta interna llamada Kairos para el área "
         "de finanzas. Flujo de aprobación de facturas de proveedores. "
         "Stack: Django + Postgres.",
-        "nombre del proyecto: Kairos",
+        "Kairos",
         "project_name",
     ),
     ScenarioTurn(
