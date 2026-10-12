@@ -103,18 +103,26 @@ def _latency_vs_tokens_curve(rows: list[dict[str, Any]]) -> str:
 
 
 def _cost_cumulative_vs_turn_curve(rows: list[dict[str, Any]]) -> str:
+    """`n` total (suma de las 3 columnas de escenario) al final de cada
+    fila: como el runner corta la conversación apenas un turno falla
+    (ver `_completion_stats`), son cada vez menos sesiones las que
+    llegan a un N alto -- el número de filas que sostienen el promedio
+    de los últimos turnos NO es el mismo que en el turno 1, y hay que
+    poder verlo para no leer la cola de la curva como si tuviera la
+    misma confianza que el principio."""
     groups: dict[tuple[str, int], list[float]] = defaultdict(list)
     for row in rows:
         groups[(row["scenario"], row["turn_index"])].append(row["cost_usd_cumulative"])
 
     scenarios = sorted({s for s, _ in groups})
     turn_indices = sorted({t for _, t in groups})
-    header = "| turn_index | " + " | ".join(scenarios) + " |"
-    sep = "|---|" + "---|" * len(scenarios)
+    header = "| turn_index | " + " | ".join(scenarios) + " | n |"
+    sep = "|---|" + "---|" * len(scenarios) + "---|"
     lines = [header, sep]
     for t in turn_indices:
         cells = [f"{statistics.mean(groups[(s, t)]):.4f}" if (s, t) in groups else "-" for s in scenarios]
-        lines.append(f"| {t} | " + " | ".join(cells) + " |")
+        n = sum(len(groups.get((s, t), [])) for s in scenarios)
+        lines.append(f"| {t} | " + " | ".join(cells) + f" | {n} |")
     return "\n".join(lines)
 
 
@@ -123,34 +131,74 @@ def _recall_vs_turn_curve(rows: list[dict[str, Any]]) -> str:
     for row in rows:
         groups[row["turn_index"]].append(row["memory_drift_recall"])
 
-    lines = ["| turn_index (N) | MemoryDriftMetric (recall medio) |", "|---|---|"]
+    lines = ["| turn_index (N) | MemoryDriftMetric (recall medio) | n |", "|---|---|---|"]
     for t in sorted(groups):
-        lines.append(f"| {t} | {statistics.mean(groups[t]):.2f} |")
+        lines.append(f"| {t} | {statistics.mean(groups[t]):.2f} | {len(groups[t])} |")
     return "\n".join(lines)
 
 
-def _completion_stats(rows: list[dict[str, Any]]) -> tuple[int, int, float]:
+def _completion_stats(
+    rows: list[dict[str, Any]], total_conversations: int | None = None
+) -> tuple[int, int, float]:
     """(conversaciones_totales, conversaciones_completas, tasa). Una
     conversación "completa" es la que llegó a turn_index == 20 -- el
     runner corta una conversación apenas un turno falla, así que cualquier
     sesión con turn_index máximo < 20 es una conversación que se rompió a
-    mitad de camino."""
+    mitad de camino.
+
+    El total NO se puede reconstruir siempre solo del CSV: una
+    conversación que falla en su PRIMER turno no deja ninguna fila (no
+    hay `session_id` que contar), así que queda invisible para
+    `len(max_turn_by_session)`. `evals.stress.run` sí conoce el total real
+    (lanzó exactamente `len(scenarios) * len(attachment_sizes) *
+    repeats` conversaciones) y lo imprime en su propio resumen -- pasalo
+    acá con `--total-conversations` para que coincida con ese número en
+    vez de subcontar silenciosamente."""
     max_turn_by_session: dict[str, int] = defaultdict(int)
     for row in rows:
         max_turn_by_session[row["session_id"]] = max(max_turn_by_session[row["session_id"]], row["turn_index"])
-    total = len(max_turn_by_session)
+    total = total_conversations if total_conversations is not None else len(max_turn_by_session)
     complete = sum(1 for n in max_turn_by_session.values() if n >= 20)
     rate = complete / total if total else 0.0
     return total, complete, rate
 
 
-def _reading_paragraphs(rows: list[dict[str, Any]]) -> str:
+def _failure_hotspot(rows: list[dict[str, Any]]) -> tuple[str, int, int] | None:
+    """(escenario, turno_en_que_falló, cantidad) de la combinación más
+    repetida entre las conversaciones que NO llegaron al turno 20 -- o
+    `None` si todas completaron. No es ruido disperso: si varias
+    conversaciones del mismo escenario se rompen en el MISMO turno, es
+    una pista concreta de qué contenido de ese turno le cuesta al modelo
+    (ej. pedirle que recalcule costos tras una corrección), no una falla
+    aleatoria distribuida parejo en el tiempo."""
+    max_turn_by_session: dict[str, tuple[str, int]] = {}
+    for row in rows:
+        sid = row["session_id"]
+        prev_turn = max_turn_by_session.get(sid, (row["scenario"], 0))[1]
+        max_turn_by_session[sid] = (row["scenario"], max(prev_turn, row["turn_index"]))
+
+    counts: dict[tuple[str, int], int] = defaultdict(int)
+    for scenario, max_turn in max_turn_by_session.values():
+        if max_turn < 20:
+            counts[(scenario, max_turn + 1)] += 1
+    if not counts:
+        return None
+    (scenario, failing_turn), count = max(counts.items(), key=lambda kv: kv[1])
+    return scenario, failing_turn, count
+
+
+def _reading_paragraphs(rows: list[dict[str, Any]], total_conversations: int | None = None) -> str:
     recall_by_turn: dict[int, list[float]] = defaultdict(list)
     cost_by_turn: dict[int, list[float]] = defaultdict(list)
     latency_misses_by_turn: dict[int, list[float]] = defaultdict(list)
     for row in rows:
         recall_by_turn[row["turn_index"]].append(row["memory_drift_recall"])
-        cost_by_turn[row["turn_index"]].append(row["cost_usd_cumulative"])
+        # Costo POR turno, no el acumulado -- el acumulado es una suma
+        # corrida que por definición siempre crece con N; compararlo
+        # turno 1 vs. turno 20 no mide degradación, mide aritmética.
+        # Lo que sí es una señal real de degradación es si CADA turno
+        # individual se vuelve más caro a medida que el historial crece.
+        cost_by_turn[row["turn_index"]].append(row["cost_usd"])
         if row["cache_hit_kind"] != "exact":
             latency_misses_by_turn[row["turn_index"]].append(row["latency_ms"])
 
@@ -174,7 +222,7 @@ def _reading_paragraphs(rows: list[dict[str, Any]]) -> str:
 
     recall_drop_pct = (recall_1 - recall_n) * 100
 
-    total_convos, complete_convos, complete_rate = _completion_stats(rows)
+    total_convos, complete_convos, complete_rate = _completion_stats(rows, total_conversations)
 
     if breaking_turn is not None:
         drift_sentence = (
@@ -195,20 +243,23 @@ def _reading_paragraphs(rows: list[dict[str, Any]]) -> str:
 
     if cost_growth >= latency_growth and cost_growth >= 1.5:
         dominant_sentence = (
-            f"La dimensión que más degrada con la longitud de la conversación es el COSTO: "
-            f"crece {cost_growth:.1f}x entre el turno 1 y el turno {max_n} (el transcript "
-            "acumulado hace que cada turno nuevo cargue con todo el historial comprimido), "
-            f"mientras que la latencia crece {latency_growth:.1f}x en el mismo tramo."
+            f"La dimensión que más degrada con la longitud de la conversación es el COSTO POR "
+            f"TURNO (no el acumulado, que siempre crece por ser una suma corrida): crece "
+            f"{cost_growth:.1f}x entre el turno 1 y el turno {max_n} -- cada turno nuevo manda "
+            "más historial comprimido al modelo, y eso se traduce en más tokens de entrada por "
+            f"turno -- mientras que la latencia por turno crece {latency_growth:.1f}x en el "
+            "mismo tramo."
         )
     elif latency_growth > cost_growth and latency_growth >= 1.5:
         dominant_sentence = (
-            f"La dimensión que más degrada con la longitud de la conversación es la LATENCIA: "
-            f"crece {latency_growth:.1f}x entre el turno 1 y el turno {max_n}, por encima del "
-            f"crecimiento de costo ({cost_growth:.1f}x) en el mismo tramo."
+            f"La dimensión que más degrada con la longitud de la conversación es la LATENCIA "
+            f"POR TURNO: crece {latency_growth:.1f}x entre el turno 1 y el turno {max_n}, por "
+            f"encima del crecimiento de costo por turno ({cost_growth:.1f}x) en el mismo tramo."
         )
     else:
         dominant_sentence = (
-            f"Ni el costo ({cost_growth:.1f}x) ni la latencia ({latency_growth:.1f}x) crecen de "
+            f"Ni el costo por turno ({cost_growth:.1f}x) ni la latencia por turno "
+            f"({latency_growth:.1f}x) crecen de "
             "forma dramática entre el turno 1 y el último -- a 20 turnos, la degradación "
             "principal de este CAG es la pérdida de memoria, no el tiempo o el precio de cada "
             "llamada."
@@ -221,6 +272,17 @@ def _reading_paragraphs(rows: list[dict[str, Any]]) -> str:
         "cierra con el total) -- también es una forma legítima en la que este CAG se rompe bajo "
         "estrés, no solo la degradación gradual de costo/latencia/memoria."
     )
+    hotspot = _failure_hotspot(rows)
+    if hotspot is not None:
+        hotspot_scenario, hotspot_turn, hotspot_count = hotspot
+        if hotspot_count >= 3:
+            error_sentence += (
+                f" No es ruido disperso: {hotspot_count} de esas conversaciones rotas son del "
+                f"escenario '{hotspot_scenario}' y se cortan exactamente en el turno "
+                f"{hotspot_turn} -- ese turno concentra el punto de quiebre más repetido de toda "
+                "la corrida, lo que sugiere un contenido específico (no solo la longitud "
+                "acumulada) que le cuesta al actor sin Critic/Boss de por medio."
+            )
 
     rag_sentence = (
         "El tamaño del adjunto solo pesa en el turno en que se sube (acá, el primero): el texto "
@@ -238,8 +300,8 @@ def _reading_paragraphs(rows: list[dict[str, Any]]) -> str:
     )
 
 
-def build_report(rows: list[dict[str, Any]]) -> str:
-    total_convos, complete_convos, complete_rate = _completion_stats(rows)
+def build_report(rows: list[dict[str, Any]], total_conversations: int | None = None) -> str:
+    total_convos, complete_convos, complete_rate = _completion_stats(rows, total_conversations)
     return f"""# Stress-test del CAG -- Reporte (sesión 6, Bloque 5/6)
 
 {len(rows)} filas (una por turno completado), {total_convos} conversaciones intentadas,
@@ -270,7 +332,7 @@ turnos con exact cache hit (ver docstring de este módulo)._
 
 ## Lectura
 
-{_reading_paragraphs(rows)}
+{_reading_paragraphs(rows, total_conversations)}
 """
 
 
@@ -278,6 +340,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=Path, default=Path("evals/stress/results.csv"))
     parser.add_argument("--output", type=Path, default=Path("evals/stress/REPORT.md"))
+    parser.add_argument(
+        "--total-conversations",
+        type=int,
+        default=None,
+        help=(
+            "Total real de conversaciones intentadas (ver docstring de "
+            "_completion_stats) -- pasalo si alguna falló en su primer "
+            "turno, porque esas no dejan fila en el CSV y el total "
+            "derivado del archivo las subcuenta."
+        ),
+    )
     args = parser.parse_args()
 
     rows = _read_rows(args.input)
@@ -285,7 +358,7 @@ def main() -> int:
         print(f"{args.input} está vacío -- corré evals.stress.run primero.")
         return 1
 
-    args.output.write_text(build_report(rows), encoding="utf-8")
+    args.output.write_text(build_report(rows, args.total_conversations), encoding="utf-8")
     print(f"REPORT.md escrito en {args.output} ({len(rows)} filas procesadas)")
     return 0
 

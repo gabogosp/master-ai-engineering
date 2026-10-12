@@ -355,7 +355,7 @@ Un README específico de evals no existe a propósito: todo el diseño vive en l
 
 ### Stress-test del CAG (`evals/stress/`)
 
-En construcción, bloque a bloque, sobre la consigna de sesión 6 ("instrumentá tu CAG antes de ver RAG en el directo"). Hasta ahora:
+Construido bloque a bloque sobre la consigna de sesión 6 ("instrumentá tu CAG antes de ver RAG en el directo"). Componentes:
 
 - **`turn_observed`**: el evento unificado por turno que alimenta el futuro `results.csv`. Desde el Bloque 4 ya no es solo un log: se construye como un objeto típado `TurnObservation` (Pydantic, `app/schemas.py`) que `EstimationService` loguea (`logger.info("turn_observed", **observation.model_dump())`) Y adjunta a la respuesta HTTP (`EstimationResponse.observation`, heredado por `ACBResponse`) — así el futuro runner de stress lo lee directo del JSON de la respuesta, sin tener que parsear logs con `capture_logs`.
 - **`evals/stress/scenarios.py`**: tres perfiles de conversación sintética, cada uno con al menos 20 turnos guionados y un *fact-tracker* por turno (qué hecho debería sobrevivir en llamadas posteriores):
@@ -366,8 +366,9 @@ En construcción, bloque a bloque, sobre la consigna de sesión 6 ("instrumentá
 - **`evals/stress/metrics.py`**: tres métricas nuevas, en un módulo separado de `evals/metrics.py` porque operan sobre otro shape (`TurnObservation`/snapshot de sesión, no `(GoldenCase, EstimationResult)`) aunque reusan el mismo `MetricResult`:
   - `LatencyBudgetMetric(budget_ms)` / `CostBudgetMetric(budget_usd)` — evalúan un `TurnObservation` contra un presupuesto fijo.
   - `MemoryDriftMetric(fact, fact_field)` — evalúa el snapshot de `GET /sessions/{id}` buscando si un hecho sigue siendo recuperable (substring case-insensitive) en `metadata.project_name`/`mentioned_technologies`/`agreed_scope`, en `summary` (texto del resumen acumulado — campo agregado a `SessionInfoResponse` en este bloque, antes solo exponía `summary_chars`), o en el snapshot completo (`fact_field="any"`).
-
-Lo que falta (bloques siguientes, no construido todavía): el runner que efectivamente dispara estos escenarios/PDFs contra sesiones reales en N ∈ {1, 3, 6, 10, 20} turnos y los 5 tamaños de adjunto, y el propio `REPORT.md`/`results.csv`.
+- **`evals/stress/run.py`**: el runner que corre los 3 escenarios × 5 tamaños de adjunto × N repeticiones contra sesiones reales (in-process por defecto vía `httpx.AsyncClient` + `ASGITransport`, con `--concurrency` para no tardar horas; `--http BASE` para apuntar a un server real) y vuelca una fila de CSV por turno a `evals/stress/results.csv`. El adjunto se sube solo en el primer turno de cada conversación (el texto extraído queda tejido en el historial persistido desde ese turno, así que repetirlo en los 20 solo multiplicaría el costo). No hace falta truncar a N ∈ {1,3,6,10,20} como el Bloque 2: cada conversación corre sus 20 turnos una sola vez y el propio `turn_index` de cada fila es la N de la curva de recall.
+- **`evals/stress/report.py`**: genera `evals/stress/REPORT.md` a partir del CSV -- tabla resumen por escenario × tamaño de adjunto, tres curvas (latencia vs tokens, costo por turno acumulado vs turn_index, recall vs N) y dos párrafos de lectura calculados desde los datos reales (ningún número hardcodeado).
+- **`evals/stress/REPORT.md`**: el reporte de la corrida real completa (45 conversaciones intentadas, hasta 900 llamadas). Hallazgos: el recall del fact-tracker cae por debajo de 0.8 ya en el turno 2; solo 5/45 conversaciones (11%) llegan completas al turno 20, y los cortes se concentran en turnos específicos (6 de las conversaciones rotas del escenario `contradiction` fallan exactamente en el turno 8, el que le pide al modelo recalcular costos tras la corrección de presupuesto) más que distribuirse parejo -- la vía actor-sin-Critic/Boss que ejercita el runner es frágil ante ese tipo de turno en particular.
 
 ## Estructura
 
@@ -402,6 +403,8 @@ master-ai-engineering/
 │   ├── test_stress_scenarios.py # Los 3 perfiles de evals/stress/scenarios.py
 │   ├── test_build_pdfs.py       # Generación de PDFs calibrados
 │   ├── test_stress_metrics.py   # LatencyBudgetMetric, CostBudgetMetric, MemoryDriftMetric
+│   ├── test_stress_run.py       # Funciones puras del runner (adjuntos, percentil, filas de CSV)
+│   ├── test_stress_report.py    # Generador de REPORT.md (completion stats, failure hotspot)
 │   ├── test_stream_and_ui.py    # Streamlit vía AppTest (mock de httpx)
 │   └── prompts/
 │       ├── test_estimation_v1.py
