@@ -1,0 +1,16 @@
+<previous_summary>
+{% if previous_summary %}
+{{ previous_summary }}
+{% else %}
+(sin resumen previo -- este es el primer pase de compresión)
+{% endif %}
+</previous_summary>
+
+<evicted_messages>
+{% for message in evicted %}
+[{{ message.role }}] {{ message.content }}
+{% endfor %}
+</evicted_messages>
+
+Devolvé el resumen acumulado actualizado que integra los mensajes evictados
+con los hechos durables que ya capturaba el resumen anterior.

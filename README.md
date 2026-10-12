@@ -1,6 +1,6 @@
 # Estimador CAG
 
-Servicio de IA (FastAPI) que genera estimaciones de software con un LLM, más un cliente web (Streamlit). Soporta dos modos: un formulario tipado de un solo turno, y una conversación multi-turno con memoria de sesión y adjuntos (PDF/Word).
+Servicio de IA (FastAPI) que genera estimaciones de software con un LLM, más un cliente web (Streamlit). Soporta dos modos: un formulario tipado de un solo turno, y una conversación multi-turno con memoria de sesión, adjuntos (PDF/Word), compresión de historial (anclas + resumen), tier dinámico de audiencia, y una variante Actor-Critic-Boss con auto-revisión.
 
 Arquitectura:
 
@@ -11,6 +11,9 @@ Streamlit (formulario + conversación)
 FastAPI ── Guardrails (input/output) ── Jinja2 (prompts versionados)
         │
         ├── Instructor + LiteLLM Router (fallback openai↔anthropic, salida validada con Pydantic)
+        │     └── grupo auxiliar barato (summarizer, anclas-llm, Critic)
+        ├── Compresión de historial (anclas heurísticas + resumen acumulativo) + tier dinámico
+        ├── Actor-Critic-Boss opcional (auditoría independiente + máquina de estados)
         ├── Redis (cache exact-match)
         ├── Redis Stack / redisvl (cache semántica: embeddings + similitud de coseno)
         └── structlog (logging estructurado)
@@ -54,6 +57,9 @@ Las variables se leen del archivo `.env`. Cualquier variable que falte usa su va
 | `SEMANTIC_CACHE_THRESHOLD` | Similitud de coseno mínima para servir un hit (0–1) | `0.85` |
 | `SEMANTIC_CACHE_TTL_SECONDS` | TTL de las entradas en cache semántica | `86400` (24h) |
 | `SEMANTIC_CACHE_LOG_ONLY` | Si es `true`, solo loguea el score sin servir hits (para calibrar el threshold) | `false` |
+| `ANCHOR_DETECTION_MODE` | Detector de anclas: `heuristic` (regex) o `llm` (clasificador vía Instructor) | `heuristic` |
+| `COMPRESSION_MODEL` | Modelo barato (siempre OpenAI) para summarizer, Critic y anclas en modo `llm` | `gpt-4o-mini` |
+| `BOSS_MAX_ITERATIONS` | Tope de iteraciones actor+critic en el flujo Actor-Critic-Boss | `3` |
 
 Con **una sola** API key de LLM configurada, el servicio funciona sin fallback. Con las dos, si el proveedor primario falla (rate limit, error 5xx, timeout), el [Router de LiteLLM](https://docs.litellm.ai/) reintenta automáticamente con el otro proveedor — incluso en las llamadas de salida estructurada (ver más abajo).
 
@@ -110,7 +116,7 @@ Dos `model_validator` de `EstimationResult` (`app/schemas.py`) son las reglas de
 
 El cliente Instructor envuelve `Router.acompletion` de LiteLLM (no `litellm.completion` directo) — las llamadas con salida estructurada también se benefician del fallback openai↔anthropic, no lo pierden.
 
-> **Limitación conocida:** la aritmética de fases/totales no siempre converge en los 6 reintentos (el modelo recalcula los números distinto en cada intento y a veces no los hace cuadrar a tiempo → `502`), y la calibración de `confidence_pct` todavía es más conservadora de lo esperado en descripciones breves pero razonables (tiende a sub-estimar la confianza y declarar `"Out of scope:"` con más frecuencia de la deseada, a pesar de los ejemplos few-shot y las instrucciones explícitas en `system.j2` calibrando lo contrario). Verificado contra la API real de `gpt-4o-mini`, no es un artefacto de los mocks. Queda documentado para una próxima iteración de calibración de prompt en vez de bloquear el resto de esta entrega.
+> **Limitación conocida:** la aritmética de fases/totales no siempre converge en los 6 reintentos (el modelo recalcula los números distinto en cada intento y a veces no los hace cuadrar a tiempo → `502`), y la calibración de `confidence_pct` todavía es más conservadora de lo esperado en descripciones breves pero razonables (tiende a sub-estimar la confianza y declarar `"Out of scope:"` con más frecuencia de la deseada, a pesar de los ejemplos few-shot y las instrucciones explícitas en `system.j2` calibrando lo contrario). Verificado contra la API real de `gpt-4o-mini`, no es un artefacto de los mocks. Queda documentado para una próxima iteración de calibración de prompt en vez de bloquear el resto de esta entrega. El framework de evals (ver más abajo) le pone un número encima: 4-5 de los fallos en una corrida de 16 casos son exactamente este bug agotando reintentos.
 
 Y por esto mismo **se eliminó el streaming** (`/estimate/stream` y `/sessions/{id}/estimate/stream` ya no existen): Instructor necesita el objeto completo para poder validarlo contra el schema — no hay "chunk parcial válido" de un JSON estructurado a medio generar, así que no hay nada que transmitir token a token. Las dos pestañas de Streamlit son bloqueantes con un `st.spinner`.
 
@@ -244,12 +250,18 @@ Crea una sesión vacía y devuelve `{"session_id": "<uuid4>"}`. Las sesiones viv
 
 ### `POST /api/v1/sessions/{session_id}/estimate`
 
-`multipart/form-data` con dos campos:
+`multipart/form-data`:
 
 | Campo | Tipo | Descripción |
 |---|---|---|
 | `transcript` | string | Lo nuevo que aporta este turno (no todo el historial — eso lo gestiona el servidor) |
 | `attachments` | archivos (opcional) | PDFs o `.docx` con especificaciones adicionales |
+| `project_type`, `detail_level`, `output_format` | opcionales | Mismo control de formato que el formulario de un solo turno. El cliente Streamlit no los manda (la pestaña Conversación es intencionalmente texto libre); el runner de evals sí, para poder fijar el estilo esperado por cada caso dorado. |
+| `tier` | opcional (`executive`\|`pm`\|`developer`\|`default`) | Override explícito del tier de audiencia — si no se manda, se deriva solo (ver más abajo). |
+
+### `POST /api/v1/sessions/{session_id}/estimate-acb`
+
+Variante **Actor-Critic-Boss** del endpoint anterior: mismo contrato de entrada, pero un auditor independiente (Critic) revisa cada borrador antes de aceptarlo. La respuesta es un `ACBResponse` (mismos campos que `EstimationResponse` + `acb`, la traza de iteración). Ver la sección Actor-Critic-Boss más abajo.
 
 ```bash
 SID=$(curl -s -X POST http://localhost:8000/api/v1/sessions | python3 -c "import sys,json;print(json.load(sys.stdin)['session_id'])")
@@ -278,20 +290,90 @@ Después de cada turno, una **segunda llamada al LLM** (prompt propio en `app/pr
 
 `ConversationHistory` guarda pares user+assistant y, al armar `to_messages_list()`, conserva solo los últimos `MAX_CONVERSATION_TURNS` (6 por defecto, configurable). El system prompt no vive en el historial — se regenera fresco cada vez a partir del `project_metadata` actual, así que siempre viaja aunque los turnos más viejos se descarten. Cada turno del asistente se guarda como el JSON del `EstimationResult` (no como prosa) — así un turno futuro ve exactamente qué fases y totales propuso el modelo y puede corregirlos con precisión en vez de tener que re-derivarlos de texto libre.
 
+## Compresión de historial: anclas + resumen acumulativo
+
+Cuando la ventana deslizante supera el tope (`MAX_CONVERSATION_TURNS * 2` mensajes), `app.compression.policy.apply_compression` corre después de cada turno y decide, par por par, qué hacer con lo que se evicta:
+
+- **Anclas** (`app/compression/anchors.py`): un detector heurístico (regex sobre frases clave — NDA, alcance congelado, presupuesto cerrado, compliance, deadline duro) marca el turno completo como ancla. Las anclas **nunca se evictan** — viajan palabra por palabra en cada llamada futura. Hay un modo `"llm"` opcional (`ANCHOR_DETECTION_MODE=llm`, clasificador binario vía Instructor) para cuando el regex no alcanza, a costo de una llamada extra por turno.
+- **Resumen acumulativo** (`app/compression/summarizer.py`): los turnos no-ancla que se evictan se funden en un único resumen rolling (una llamada LLM, no una cadena) que reemplaza al resumen anterior. Si falla, se conserva el resumen previo — la compresión es best-effort, nunca tira la sesión.
+
+`ConversationHistory.to_messages_list()` compone el array final como `system + [resumen] + anclas + ventana reciente`. El resumen **no viaja como un mensaje `user` aparte**: como las anclas y la ventana siempre arrancan con un turno de usuario, eso dejaría dos mensajes `user` consecutivos — rompe la alternancia estricta que exige, por ejemplo, la API de mensajes de Anthropic (confirmado empíricamente: el propio pipeline de Instructor los fusiona). En cambio, el resumen se antepone al contenido del primer mensaje existente.
+
+## Tier dinámico de audiencia
+
+`app/tier_resolver.py` deriva, en cada turno, para quién está escrita la estimación — `executive`, `pm`, `developer` o `default` — a partir de una cadena de reglas regex puras sobre el transcript + `project_metadata` (NDA/regulatorio → `executive`, ≥2 keywords técnicas distintas → `developer`, equipo ≤2 → `pm`). La primera regla que matchea gana; el resolver devuelve el tier **y el nombre de la regla** que disparó, para que quede explicable (`GET /sessions/{id}` lo expone). Un override explícito (`tier=` en el form) siempre gana sobre la heurística. El tier resuelto alimenta el bloque `<audience>` del prompt, que ajusta tono y nivel de jerga sin tocar el schema de salida.
+
+### `GET /api/v1/sessions/{session_id}`
+
+Vista de debug de una sesión — no dispara ninguna llamada a LLM, solo lee el estado ya calculado:
+
+```json
+{
+  "session_id": "...",
+  "message_count": 4,
+  "max_turns": 6,
+  "metadata": { "...": "..." },
+  "anchors_count": 1,
+  "summary_chars": 312,
+  "last_resolved_tier": "executive",
+  "last_tier_rule": "nda_detected"
+}
+```
+
+## Actor-Critic-Boss
+
+`POST /sessions/{id}/estimate-acb` agrega una capa de auto-revisión sobre el turno conversacional:
+
+- **Critic** (`app/critic.py`): un auditor independiente y stateless que recibe la estimación del actor (nunca la generó él) y la revisa contra 7 heurísticas (`math_error`, `hallucination`, `scope_mismatch`, `phase_imbalance`, `missing_assumption`, `unrealistic_estimate`, `tier_mismatch`), devolviendo un `CriticFeedback` **estructurado** (nunca prosa) con un veredicto (`accept` / `needs_iteration` / `reject`) y la lista de issues. Si el Critic mismo falla, se degrada a `accept` con confianza 0 — el pipeline nunca se cae por esto.
+- **Boss** (`app/boss.py`): una máquina de estados pura (sin llamadas a LLM propias) que decide, según el veredicto del Critic, si aceptar, pedir una nueva iteración del actor (tejiendo el feedback en el prompt vía el bloque `<critic_feedback>`) o sintetizar un fallback. El fallback **nunca devuelve un sobre vacío**: anota las salvedades del Critic sobre el último borrador y reduce la confianza a la mitad (piso en 30, para no disparar la regla de "Out of scope:"). Tope de iteraciones: `BOSS_MAX_ITERATIONS` (3 por defecto — un borrador inicial + dos reintentos dirigidos).
+- La sesión se actualiza **solo** con el resultado final — los borradores intermedios del actor son descartables, y el historial nunca carga el ruido del `<critic_feedback>` tejido en los prompts intermedios.
+- Critic (y el summarizer de compresión) corren contra un grupo de Router dedicado (`estimator-auxiliary`, siempre OpenAI + `COMPRESSION_MODEL`) para no pagar el modelo primario en llamadas que no lo necesitan — se degrada solo al grupo primario si falta `OPENAI_API_KEY`.
+
+> **Nota sobre el bug de aritmética documentado arriba**: con ACB, el actor puede hacer *más* llamadas estructuradas por turno (una por iteración) — así que la misma limitación de Instructor-agotando-reintentos tiene más superficie donde aparecer. No es un problema nuevo de ACB, es el mismo de siempre, con más exposición.
+
+## Framework de evals
+
+`evals/` corre el estimador contra un dataset dorado de 16 casos (`evals/golden_dataset.json`) y tres métricas determinísticas (`evals/metrics.py`) — viven en el repo, no delegan a un juez LLM, para que la suite diga *por qué* falló un caso sin gastar un LLM extra:
+
+- **`SchemaAdherenceMetric`**: ¿la aritmética cuadra? ¿la regla de confianza baja se respeta? ¿la cantidad de fases cae en el rango esperado del caso?
+- **`CostBoundsMetric`**: ¿el costo/duración total caen en el rango esperado? (los casos `expected_out_of_scope` esperan el sobre placeholder cost=0/duration=1).
+- **`ContentRecallMetric`**: ¿el summary menciona los términos/tecnologías que el cliente pidió? Se salta en los casos out-of-scope.
+
+```bash
+uv run python -m evals.run --mode actor              # contra el actor simple
+uv run python -m evals.run --mode acb --limit 5       # contra Actor-Critic-Boss, primeros 5 casos
+uv run python -m evals.run --mode actor --output /tmp/report.json
+uv run python -m evals.run --mode actor --http http://localhost:8000  # contra un server real en vez de in-process
+```
+
+El dataset cubre deliberadamente los bordes: casos out-of-scope (vago y adversarial/prompt-injection — un 400 del guardrail de input cuenta como el resultado esperado), los tres tiers no-default, y un caso de deadline ajustado. Una corrida contra la API real (`--mode actor`, sin filtrar) deja hoy **5/16 casos pasando las tres métricas** — el framework está cumpliendo su propósito de sesión 6: producir una baseline cuantitativa del CAG *antes* de comparar contra RAG en el directo. La mayoría de los fallos son el mismo bug de aritmética de Instructor ya documentado (4-5 casos agotan los reintentos), y el resto son casos límite de calibración de costo/duración y de recall de contenido — señal real, no ruido del framework.
+
+Un README específico de evals no existe a propósito: todo el diseño vive en los docstrings de `evals/dataset.py`, `evals/metrics.py` y `evals/run.py`.
+
 ## Estructura
 
 ```
 master-ai-engineering/
 ├── streamlit_app.py             # Cliente web (2 pestañas: formulario y conversación, las dos bloqueantes)
 ├── docker-compose.yml           # Redis Stack (cache exact-match + cache semántica)
+├── evals/
+│   ├── dataset.py                # GoldenCase + load_dataset()
+│   ├── golden_dataset.json       # 16 casos dorados
+│   ├── metrics.py                # SchemaAdherenceMetric, CostBoundsMetric, ContentRecallMetric
+│   └── run.py                     # CLI: uv run python -m evals.run --mode actor|acb
 ├── tests/
 │   ├── conftest.py
 │   ├── test_api.py              # Endpoints, códigos de error, prompt_version
 │   ├── test_cache.py            # Clave de cache exact-match
 │   ├── test_semantic_cache.py   # Bucket, hit/miss por similitud, log_only (Redis Stack real + vectorizer fake)
 │   ├── test_config.py           # Settings
-│   ├── test_schemas.py          # Validación Pydantic de los schemas (incluido EstimationResult)
-│   ├── test_sessions_integration.py  # Sesiones end-to-end (httpx.AsyncClient)
+│   ├── test_schemas.py          # Validación Pydantic de los schemas (incluido EstimationResult, CriticFeedback)
+│   ├── test_sessions.py         # ConversationHistory, ProjectMetadata (unitarios)
+│   ├── test_sessions_integration.py  # Sesiones end-to-end (httpx.AsyncClient), incluido ACB
+│   ├── test_tier_resolver.py    # Cadena de reglas del tier dinámico
+│   ├── test_compression.py      # Detección de anclas, política de compresión
+│   ├── test_boss.py             # Máquina de estados Actor-Critic-Boss
+│   ├── test_evals.py            # Dataset dorado + métricas del framework de evals
 │   ├── test_stream_and_ui.py    # Streamlit vía AppTest (mock de httpx)
 │   └── prompts/
 │       ├── test_estimation_v1.py
@@ -300,22 +382,31 @@ master-ai-engineering/
 ├── app/
 │   ├── main.py                  # App FastAPI + logging + endpoint /health
 │   ├── config.py                # Configuración desde .env
-│   ├── schemas.py                # EstimationRequest/Response, EstimationResult, Phase, enums
-│   ├── sessions.py                # ProjectMetadata, ConversationHistory, SessionStore
+│   ├── schemas.py                # EstimationRequest/Response, EstimationResult, Phase, CriticFeedback, BossTrace, enums
+│   ├── sessions.py                # ProjectMetadata, ConversationHistory (anclas+resumen), SessionStore
+│   ├── tier_resolver.py           # Tier dinámico de audiencia (cadena de reglas)
+│   ├── critic.py                  # Critic: auditoría independiente de una EstimationResult
+│   ├── boss.py                    # Boss: máquina de estados accept/iterate/synthesize
 │   ├── attachments.py             # Extracción local de texto (pypdf / python-docx)
 │   ├── logging_config.py         # structlog (consola en dev, JSON en prod)
+│   ├── compression/
+│   │   ├── anchors.py             # AnchorDetector (heuristic + llm)
+│   │   ├── summarizer.py          # CumulativeSummarizer
+│   │   └── policy.py              # CompressionPolicy / apply_compression
 │   ├── guardrails/
 │   │   ├── input.py               # check_input: moderación + prompt-injection + PII
 │   │   └── output.py              # enforce_scope_response: filtro de confianza baja
 │   ├── prompts/
-│   │   ├── loader.py              # render_estimation_prompt, render_session_prompt
-│   │   ├── estimation/{v1,v2}/    # Templates Jinja2 de estimación
-│   │   └── metadata_extraction/v1/  # Templates Jinja2 de extracción de metadata
+│   │   ├── loader.py              # render_estimation_prompt, render_session_prompt, render_critic_prompt...
+│   │   ├── estimation/{v1,v2}/    # Templates Jinja2 de estimación (incluido <audience>)
+│   │   ├── metadata_extraction/v1/  # Templates Jinja2 de extracción de metadata
+│   │   ├── conversation_summary/v1/ # Templates del summarizer acumulativo
+│   │   └── critic/v1/             # Templates del Critic
 │   ├── routers/
 │   │   ├── estimations.py         # POST /estimate (guardrails + cache semántica + Instructor)
-│   │   └── sessions.py            # POST /sessions, /estimate
+│   │   └── sessions.py            # POST /sessions, /estimate, /estimate-acb, GET /sessions/{id}
 │   └── services/
-│       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache exact-match, Instructor, multi-turno
+│       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache exact-match, Instructor, multi-turno, grupo auxiliar
 │       ├── openai_client.py       # Cliente OpenAI compartido (moderación, embeddings)
 │       ├── semantic_cache.py      # Cache semántica: redisvl + Redis Stack
 │       ├── metadata_extraction.py # Segunda llamada al LLM que extrae project_metadata
@@ -336,7 +427,12 @@ Todos corren con mocks de LLM (sin API keys reales para generar estimaciones) y 
 - **Cache semántica** (`test_semantic_cache.py`, contra Redis Stack real con un vectorizer fake controlado a mano): bucket determinístico y sensible a cada campo; hit con texto parecido en el mismo bucket; miss con texto no relacionado; miss cruzando buckets aunque el texto sea idéntico; `log_only` nunca sirve un hit.
 - Templates de prompt (`v1` y `v2`): contenido literal de la descripción, bloques condicionales mutuamente excluyentes, `reference_projects`, versión inexistente, semántica de `StrictUndefined`, prompt de sesión (metadata vacía/poblada, instrucción de ajustar alcance solo en el flujo conversacional).
 - Streamlit (`AppTest`) con `httpx.MockTransport`: formulario, respuesta estructurada, validación, turno conversacional.
-- **Integración de sesiones** (`test_sessions_integration.py`, con `httpx.AsyncClient` sobre la app vía `ASGITransport`): `project_metadata` se actualiza y se fusiona a través de dos turnos; el contenido de un PDF adjunto efectivamente llega al LLM; la ventana deslizante nunca manda más de `MAX_CONVERSATION_TURNS` turnos al modelo aunque la sesión tenga más historial acumulado.
+- **Integración de sesiones** (`test_sessions_integration.py`, con `httpx.AsyncClient` sobre la app vía `ASGITransport`): `project_metadata` se actualiza y se fusiona a través de dos turnos; el contenido de un PDF adjunto efectivamente llega al LLM; la ventana deslizante nunca manda más de `MAX_CONVERSATION_TURNS` turnos al modelo (contando el resumen fusionado) aunque la sesión tenga más historial acumulado; `GET /sessions/{id}` refleja la compresión y el tier; `/estimate-acb` acepta en la primera pasada y, por separado, itera con el feedback del Critic realmente tejido en el segundo prompt del actor.
+- **Tier dinámico** (`test_tier_resolver.py`): cada regla de la cadena (NDA, regulatorio, keywords técnicas, equipo chico), precedencia entre reglas, override explícito.
+- **Compresión** (`test_compression.py`): el detector heurístico de anclas matchea/no matchea; la política no hace nada bajo el tope, evicta a resumen o promueve a ancla según corresponda, es idempotente.
+- **`ConversationHistory`** (`test_sessions.py`): `to_messages_list` nunca deja dos mensajes del mismo rol consecutivos (el resumen se fusiona, no se agrega aparte).
+- **Boss** (`test_boss.py`): acepta en la primera pasada, itera y después acepta, sintetiza en `reject` y al agotar el presupuesto de iteraciones, el piso de confianza sintetizada nunca cruza el umbral de "Out of scope:".
+- **Framework de evals** (`test_evals.py`): el dataset dorado carga completo (16 casos, ids únicos) y cada métrica (`SchemaAdherenceMetric`, `CostBoundsMetric`, `ContentRecallMetric`) se prueba por separado con resultados sintéticos.
 
 ## Cómo mejorar las estimaciones
 

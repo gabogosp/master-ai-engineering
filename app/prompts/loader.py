@@ -10,6 +10,8 @@ from app.sessions import ProjectMetadata
 
 PROMPTS_DIR = Path(__file__).parent / "estimation"
 METADATA_PROMPTS_DIR = Path(__file__).parent / "metadata_extraction"
+CONVERSATION_SUMMARY_PROMPTS_DIR = Path(__file__).parent / "conversation_summary"
+CRITIC_PROMPTS_DIR = Path(__file__).parent / "critic"
 
 logger = structlog.get_logger(__name__)
 
@@ -45,6 +47,19 @@ def _metadata_environment(version: str) -> Environment:
     return _jinja_environment(METADATA_PROMPTS_DIR, version)
 
 
+@lru_cache(maxsize=None)
+def _conversation_summary_environment(version: str) -> Environment:
+    """Mismo patrón, para los templates del summarizer acumulativo
+    (app.compression.summarizer)."""
+    return _jinja_environment(CONVERSATION_SUMMARY_PROMPTS_DIR, version)
+
+
+@lru_cache(maxsize=None)
+def _critic_environment(version: str) -> Environment:
+    """Mismo patrón, para los templates del Critic (app.critic)."""
+    return _jinja_environment(CRITIC_PROMPTS_DIR, version)
+
+
 def render_estimation_prompt(request: EstimationRequest, version: str = "v1") -> tuple[str, str]:
     """Renderiza (system, user) para el endpoint de estimación.
 
@@ -61,6 +76,10 @@ def render_estimation_prompt(request: EstimationRequest, version: str = "v1") ->
         # El flujo de formulario (un solo turno) no tiene project_metadata
         # de sesión; el bloque <project_metadata> queda vacío.
         project_metadata=None,
+        # El tier de audiencia es un concepto conversacional (se deriva del
+        # transcript + metadata acumulada); el formulario de un solo turno
+        # no lo resuelve, así que el bloque <audience> queda vacío.
+        tier=None,
     )
     user = env.get_template("user.j2").render(
         project_type=request.project_type,
@@ -87,26 +106,46 @@ def render_session_prompt(
     transcript: str,
     project_metadata: ProjectMetadata,
     version: str = "v1",
+    tier=None,
+    critic_feedback=None,
+    project_type=None,
+    detail_level=None,
+    output_format=None,
 ) -> tuple[str, str]:
     """Renderiza (system, user) para un turno del endpoint conversacional
-    (POST /sessions/{session_id}/estimate).
+    (POST /sessions/{session_id}/estimate o .../estimate-acb).
 
-    A diferencia de render_estimation_prompt, acá no hay project_type ni
-    output_format/detail_level tipados -- el turno es texto libre
-    (transcript + adjuntos). El system.j2 sigue siendo el mismo archivo
-    que el flujo de formulario: sus bloques condicionales por formato
-    simplemente no matchean nada cuando esos valores son None, así que no
-    se le fuerza ningún formato de salida a la conversación.
+    A diferencia de render_estimation_prompt, acá el turno es texto libre
+    (transcript + adjuntos) -- pero el caller puede opcionalmente pasar
+    `project_type`/`detail_level`/`output_format` para pedir el mismo
+    control de formato que tiene el formulario de un solo turno (lo
+    necesita, por ejemplo, el runner de evals -- ver evals/run.py). El
+    system.j2 es el mismo archivo que el flujo de formulario: sus bloques
+    condicionales simplemente no matchean nada cuando estos valores quedan
+    en None, así que no se le fuerza ningún formato a una conversación que
+    no lo pide.
+
+    `tier` (app.tier_resolver.Tier | None) sí es propio de este flujo: lo
+    resuelve el router antes de renderizar, a partir del transcript + la
+    metadata acumulada (ver app.tier_resolver.resolve_tier).
+
+    `critic_feedback` (app.schemas.CriticFeedback | None) solo lo usa el
+    flujo Actor-Critic-Boss: en la segunda iteración en adelante, el Boss
+    vuelve a renderizar el prompt con el feedback de la ronda anterior para
+    que el actor sepa qué corregir.
     """
     env = _environment(version)
 
     system = env.get_template("system.j2").render(
-        project_type=None,
-        detail_level=None,
-        output_format=None,
+        project_type=project_type,
+        detail_level=detail_level,
+        output_format=output_format,
         project_metadata=project_metadata,
+        tier=tier,
     )
-    user = env.get_template("session_user.j2").render(transcript=transcript)
+    user = env.get_template("session_user.j2").render(
+        transcript=transcript, critic_feedback=critic_feedback
+    )
 
     content_hash = hashlib.sha256(f"{system}\n{user}".encode()).hexdigest()[:16]
     logger.info(
@@ -136,4 +175,45 @@ def render_metadata_extraction_prompt(
         transcript=transcript,
         assistant_response=assistant_response,
     )
+    return system, user
+
+
+def render_conversation_summary_prompt(
+    *,
+    previous_summary: str | None,
+    evicted: list[dict],
+    version: str = "v1",
+) -> tuple[str, str]:
+    """Renderiza (system, user) para el summarizer acumulativo (ver
+    app.compression.summarizer.CumulativeSummarizer).
+
+    `evicted` es una lista de dicts {"role": ..., "content": ...} -- los
+    mensajes que la ventana deslizante está por descartar."""
+    env = _conversation_summary_environment(version)
+    context = {"previous_summary": previous_summary or "", "evicted": evicted}
+    system = env.get_template("system.j2").render(**context)
+    user = env.get_template("user.j2").render(**context)
+    return system, user
+
+
+def render_critic_prompt(
+    *,
+    transcript: str,
+    metadata: ProjectMetadata,
+    tier,
+    result,
+    version: str = "v1",
+) -> tuple[str, str]:
+    """Renderiza (system, user) para el Critic (ver app.critic.Critic).
+
+    `tier` acepta tanto el enum Tier como su valor string."""
+    env = _critic_environment(version)
+    context = {
+        "transcript": transcript,
+        "metadata": metadata,
+        "tier": tier.value if hasattr(tier, "value") else str(tier),
+        "result": result,
+    }
+    system = env.get_template("system.j2").render(**context)
+    user = env.get_template("user.j2").render(**context)
     return system, user

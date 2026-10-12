@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -42,6 +43,23 @@ class EstimationRequest(BaseModel):
 
 class SessionCreatedResponse(BaseModel):
     session_id: str
+
+
+class SessionInfoResponse(BaseModel):
+    """Vista de debug de una sesión (GET /sessions/{id}): además del
+    historial y la metadata, expone lo que la ventana deslizante comprimida
+    produjo -- cuántos mensajes quedan en la ventana activa, cuántos se
+    promovieron a ancla, cuántos caracteres tiene el resumen acumulado, y
+    el último tier de audiencia resuelto (con la regla que lo disparó)."""
+
+    session_id: str
+    message_count: int
+    max_turns: int
+    metadata: dict
+    anchors_count: int = 0
+    summary_chars: int = 0
+    last_resolved_tier: str | None = None
+    last_tier_rule: str | None = None
 
 
 # --- Salida estructurada (Instructor + Pydantic) ----------------------------
@@ -119,3 +137,90 @@ class EstimationResponse(BaseModel):
     # el endpoint de formulario de un solo turno los deja en None.
     project_metadata: dict | None = None
     history_turns: int | None = None
+
+
+# --- Actor-Critic-Boss (POST /sessions/{id}/estimate-acb) -------------------
+#
+# El Critic audita una EstimationResult ya generada por el actor (el mismo
+# generate_structured_conversation_turn de siempre) y devuelve feedback
+# ESTRUCTURADO -- nunca prosa libre, para que el Boss pueda decidir en código
+# qué hacer con cada issue en vez de tener que parsear texto.
+
+CriticIssueCategory = Literal[
+    "math_error",
+    "hallucination",
+    "scope_mismatch",
+    "phase_imbalance",
+    "missing_assumption",
+    "unrealistic_estimate",
+    "tier_mismatch",
+]
+
+CriticIssueSeverity = Literal["critical", "major", "minor"]
+
+CriticVerdict = Literal["accept", "needs_iteration", "reject"]
+
+
+class CriticIssue(BaseModel):
+    """Un defecto puntual señalado por el Critic.
+
+    `field_path` usa notación con puntos/corchetes sobre la estimación bajo
+    revisión (`phases[2].cost_eur`, `summary`, `total_cost_eur`). El Boss
+    puede reenviarlo tal cual al prompt del actor en la siguiente iteración."""
+
+    category: CriticIssueCategory
+    severity: CriticIssueSeverity
+    field_path: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=5, max_length=500)
+    suggested_fix: str | None = Field(default=None, max_length=300)
+
+
+class CriticFeedback(BaseModel):
+    """Salida completa del Critic. El Boss la trata como autoritativa.
+
+    Validator: `needs_iteration` exige al menos un issue critical/major --
+    si el Critic solo marca issues minor, debería aceptar directamente en
+    vez de gastar otra llamada al actor."""
+
+    verdict: CriticVerdict
+    issues: list[CriticIssue] = Field(default_factory=list, max_length=12)
+    confidence_in_review: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def iteration_requires_blocking_issue(self) -> "CriticFeedback":
+        if self.verdict == "needs_iteration":
+            blocking = [i for i in self.issues if i.severity in {"critical", "major"}]
+            if not blocking:
+                raise ValueError(
+                    "verdict 'needs_iteration' requires at least one issue with "
+                    "severity in {critical, major}; minor-only issues should accept"
+                )
+        if self.verdict == "reject" and not self.issues:
+            raise ValueError("verdict 'reject' requires at least one issue describing why")
+        return self
+
+
+BossDecision = Literal["accept", "iterate", "synthesize"]
+
+
+class ACBIteration(BaseModel):
+    """Registro de auditoría de una ronda actor+critic -- se persiste en la
+    respuesta para poder mostrar la traza completa (panel de debug)."""
+
+    iteration: int = Field(ge=0)
+    decision_after: BossDecision
+    critic_verdict: str
+    critic_confidence: int = Field(ge=0, le=100)
+    issue_summary: list[str] = Field(default_factory=list)
+
+
+class BossTrace(BaseModel):
+    iterations: list[ACBIteration] = Field(default_factory=list)
+    final_decision: BossDecision
+    iterations_run: int = Field(ge=0)
+
+
+class ACBResponse(EstimationResponse):
+    """Misma forma que EstimationResponse más la traza de Actor-Critic-Boss."""
+
+    acb: BossTrace

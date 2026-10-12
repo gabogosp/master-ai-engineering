@@ -48,35 +48,77 @@ class ProjectMetadata(BaseModel):
 
 @dataclass
 class ConversationHistory:
-    """Ventana deslizante de turnos (pares user+assistant).
+    """Ventana deslizante de turnos (pares user+assistant), aumentada con
+    anclas y resumen acumulativo.
 
-    Guarda solo los mensajes de la conversación -- el system prompt NO
-    vive acá: se regenera fresco en cada turno a partir del
-    project_metadata actual, así que nunca queda desactualizado respecto
+    Tres compartimentos:
+
+    - `messages`: la ventana deslizante reciente (últimos `max_turns` pares).
+      La mutan directamente `add_turn` y la compresión (ver app.compression).
+    - `anchors`: turnos marcados por `AnchorDetector` como compromisos
+      durables (NDA, alcance congelado, compliance...). Viven fuera de la
+      ventana y la compresión nunca los evicta.
+    - `summary`: texto libre con el resumen acumulado de los turnos
+      no-ancla que ya se plegaron fuera de la ventana.
+
+    El system prompt NO vive acá: se regenera fresco en cada turno a partir
+    del project_metadata actual, así que nunca queda desactualizado respecto
     a lo que el servicio sabe del proyecto en ese momento.
+
+    `add_turn` es una operación de datos pura -- no recorta ni promueve
+    nada. Después de cada turno, el router llama explícitamente a
+    `app.compression.apply_compression(history)`, que es la única pieza que
+    muta `messages`/`anchors`/`summary` más allá de `add_turn`.
     """
 
     max_turns: int
-    _turns: list[tuple[dict, dict]] = field(default_factory=list)
+    messages: list[dict] = field(default_factory=list)
+    anchors: list[dict] = field(default_factory=list)
+    summary: str | None = None
 
     def add_turn(self, user_message: dict, assistant_message: dict) -> None:
-        self._turns.append((user_message, assistant_message))
+        self.messages.append(user_message)
+        self.messages.append(assistant_message)
 
     def to_messages_list(self, system_prompt: str) -> list[dict]:
-        """Arma el array `messages` listo para la API del LLM: el system
-        prompt (siempre presente, regenerado por quien llama) + los
-        últimos `max_turns` turnos. Los turnos más viejos se descartan
-        primero -- ventana deslizante simple, sin resumen ni anclas.
+        """Arma el array `messages` listo para la API del LLM: system
+        prompt + [resumen, si hay] + anclas (en orden) + ventana reciente.
+
+        El orden es intencional: el resumen ancla al modelo en el arranque
+        de la conversación, las anclas cargan los compromisos irreducibles
+        palabra por palabra, y la ventana reciente da el contexto turno a
+        turno activo.
+
+        El resumen NO se agrega como un mensaje `user` aparte: como las
+        anclas y la ventana siempre empiezan con un turno de usuario, eso
+        dejaría dos mensajes `user` consecutivos. Algunos proveedores (la
+        API de mensajes de Anthropic, en particular) exigen alternancia
+        estricta user/assistant y rechazan esa forma; en la práctica
+        también vimos que el propio pipeline de Instructor la fusiona
+        silenciosamente. En vez de eso, el resumen se antepone al
+        contenido del primer mensaje `user` que exista.
         """
-        windowed = self._turns[-self.max_turns :] if self.max_turns > 0 else []
-        messages = [{"role": "system", "content": system_prompt}]
-        for user_message, assistant_message in windowed:
-            messages.append(user_message)
-            messages.append(assistant_message)
-        return messages
+        body = [*self.anchors, *self.messages]
+        if self.summary:
+            summary_block = (
+                "[Resumen de la conversación anterior -- los turnos "
+                "recientes abajo son el hilo vivo]\n" + self.summary
+            )
+            if body:
+                first = body[0]
+                body = [
+                    {"role": "user", "content": f"{summary_block}\n\n{first['content']}"},
+                    *body[1:],
+                ]
+            else:
+                body = [{"role": "user", "content": summary_block}]
+        return [{"role": "system", "content": system_prompt}, *body]
 
     def __len__(self) -> int:
-        return len(self._turns)
+        """Cantidad de turnos en la ventana ACTIVA (sin contar anclas ni
+        resumen) -- es la cifra que demuestra que la ventana deslizante
+        respeta su límite."""
+        return len(self.messages) // 2
 
 
 @dataclass
@@ -85,6 +127,10 @@ class Session:
     history: ConversationHistory
     metadata: ProjectMetadata = field(default_factory=ProjectMetadata)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # Cachean la última resolución de tier para que GET /sessions/{id} pueda
+    # mostrarla sin tener que re-correr el resolver.
+    last_resolved_tier: str | None = None
+    last_tier_rule: str | None = None
 
 
 class SessionStore:

@@ -108,3 +108,53 @@ def test_estimation_response_round_trip():
     assert dumped["prompt_version"] == "v1"
     assert dumped["input_tokens"] == 100
     assert dumped["result"]["total_cost_eur"] == 10_000
+
+
+def test_critic_feedback_accept_allows_empty_issues():
+    from app.schemas import CriticFeedback
+
+    feedback = CriticFeedback(verdict="accept", issues=[], confidence_in_review=90)
+    assert feedback.issues == []
+
+
+def test_critic_feedback_needs_iteration_requires_blocking_issue():
+    from app.schemas import CriticFeedback, CriticIssue
+
+    with pytest.raises(ValidationError):
+        CriticFeedback(
+            verdict="needs_iteration",
+            issues=[
+                CriticIssue(
+                    category="tier_mismatch",
+                    severity="minor",
+                    field_path="summary",
+                    description="Tono levemente informal para el tier ejecutivo.",
+                )
+            ],
+            confidence_in_review=80,
+        )
+
+
+def test_critic_feedback_needs_iteration_accepts_with_major_issue():
+    from app.schemas import CriticFeedback, CriticIssue
+
+    feedback = CriticFeedback(
+        verdict="needs_iteration",
+        issues=[
+            CriticIssue(
+                category="math_error",
+                severity="major",
+                field_path="total_cost_eur",
+                description="La suma de fases no coincide con el total.",
+            )
+        ],
+        confidence_in_review=80,
+    )
+    assert feedback.verdict == "needs_iteration"
+
+
+def test_critic_feedback_reject_requires_at_least_one_issue():
+    from app.schemas import CriticFeedback
+
+    with pytest.raises(ValidationError):
+        CriticFeedback(verdict="reject", issues=[], confidence_in_review=80)

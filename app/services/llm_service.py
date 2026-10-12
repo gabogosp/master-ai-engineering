@@ -16,10 +16,16 @@ T = TypeVar("T", bound=BaseModel)
 MAX_OUTPUT_TOKENS = 4096
 TEMPERATURE = 0.3
 
-# Nombres lógicos de los dos grupos del Router. El código de negocio solo
-# conoce PRIMARY_GROUP; el Router decide qué modelo físico atiende cada uno.
+# Nombres lógicos de los grupos del Router. El código de negocio solo
+# conoce estos nombres; el Router decide qué modelo físico atiende cada uno.
 PRIMARY_GROUP = "estimator-primary"
 FALLBACK_GROUP = "estimator-fallback"
+# Grupo barato para llamadas auxiliares (summarizer, detector de anclas en
+# modo "llm", Critic) -- siempre vía OpenAI con un modelo barato, sin
+# importar qué proveedor sea el primario de estimación. Requiere
+# OPENAI_API_KEY (igual que moderación y embeddings); si falta, estas
+# llamadas se degradan solas al PRIMARY_GROUP en vez de romper.
+AUXILIARY_GROUP = "estimator-auxiliary"
 
 # Modelo de respaldo por proveedor. Si LLM_PROVIDER=openai fallamos hacia
 # Anthropic y viceversa. Solo se activa si existe la API key de ese proveedor.
@@ -121,7 +127,25 @@ def _build_router() -> Router:
         )
         fallbacks = [{PRIMARY_GROUP: [FALLBACK_GROUP]}]
 
+    if settings.openai_api_key:
+        model_list.append(
+            {
+                "model_name": AUXILIARY_GROUP,
+                "litellm_params": {
+                    "model": settings.compression_model,
+                    "api_key": settings.openai_api_key,
+                },
+            }
+        )
+
     return Router(model_list=model_list, fallbacks=fallbacks, num_retries=1)
+
+
+def auxiliary_model_group() -> str:
+    """Grupo a usar para llamadas baratas (summarizer, ancla-modo-llm,
+    Critic): AUXILIARY_GROUP si hay OPENAI_API_KEY, si no PRIMARY_GROUP --
+    así nunca rompen por falta de esa key, solo pierden el ahorro de costo."""
+    return AUXILIARY_GROUP if settings.openai_api_key else PRIMARY_GROUP
 
 
 # Se construye una sola vez y se reutiliza. Si falta la API key, la excepción
@@ -283,6 +307,7 @@ async def _call_structured(
     call_logger,
     response_model: type[T],
     max_retries: int,
+    model_group: str = PRIMARY_GROUP,
 ) -> StructuredLLMResult[T]:
     """Lógica compartida de llamadas estructuradas (cache, Instructor sobre
     el Router, logging) entre un turno único (`generate_structured`) y uno
@@ -305,7 +330,7 @@ async def _call_structured(
 
     try:
         parsed, completion = await client.chat.completions.create_with_completion(
-            model=PRIMARY_GROUP,
+            model=model_group,
             messages=messages,
             max_tokens=MAX_OUTPUT_TOKENS,
             temperature=TEMPERATURE,
@@ -378,9 +403,14 @@ async def generate_structured(
     user: str,
     response_model: type[T],
     max_retries: int = 6,
+    model_group: str = PRIMARY_GROUP,
 ) -> StructuredLLMResult[T]:
     """Turno único: `system`/`user` ya renderizados (ver
-    app.prompts.loader.render_estimation_prompt)."""
+    app.prompts.loader.render_estimation_prompt).
+
+    `model_group` permite usar un grupo del Router distinto al primario --
+    ej. AUXILIARY_GROUP para llamadas baratas (summarizer, Critic, anclas
+    en modo "llm") que no necesitan la calidad/costo del modelo principal."""
     cache_key = build_cache_key(
         system=system,
         user=user,
@@ -388,17 +418,21 @@ async def generate_structured(
         temperature=TEMPERATURE,
         max_tokens=MAX_OUTPUT_TOKENS,
         response_model=response_model.__name__,
+        model_group=model_group,
     )
     call_logger = logger.bind(
         requested_provider=settings.llm_provider,
         requested_model=settings.llm_model,
         response_model=response_model.__name__,
+        model_group=model_group,
     )
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-    return await _call_structured(messages, cache_key, call_logger, response_model, max_retries)
+    return await _call_structured(
+        messages, cache_key, call_logger, response_model, max_retries, model_group=model_group
+    )
 
 
 async def generate_structured_conversation_turn(

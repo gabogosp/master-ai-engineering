@@ -85,6 +85,33 @@ startxref
 # el mock, distinguir una llamada de estimación de una de extracción sin
 # acoplarnos a detalles internos del Router.
 METADATA_SYSTEM_MARKER = "extract structured project metadata"
+# Marcador literal del system.j2 del summarizer acumulativo -- permite, en
+# el mock, distinguir una llamada de compresión de historial de una
+# llamada de estimación real, igual que METADATA_SYSTEM_MARKER.
+SUMMARIZER_SYSTEM_MARKER = "summarizer de conversaciones"
+# Idem para el Critic del flujo Actor-Critic-Boss.
+CRITIC_SYSTEM_MARKER = "independent auditor of software estimations"
+
+
+def _critic_feedback_json(verdict: str = "accept") -> str:
+    import json as _json
+
+    if verdict == "accept":
+        return _json.dumps({"verdict": "accept", "issues": [], "confidence_in_review": 90})
+    return _json.dumps(
+        {
+            "verdict": verdict,
+            "issues": [
+                {
+                    "category": "math_error",
+                    "severity": "critical",
+                    "field_path": "total_cost_eur",
+                    "description": "La suma de fases no coincide con el total declarado.",
+                }
+            ],
+            "confidence_in_review": 85,
+        }
+    )
 
 
 def _scripted_acompletion(script: Callable[[list[dict]], str]):
@@ -192,17 +219,24 @@ async def test_attachment_content_reaches_the_llm():
 async def test_sliding_window_caps_messages_sent_to_llm():
     """Manda 8 turnos a la misma sesión y confirma que el array `messages`
     que efectivamente llega al LLM nunca supera la ventana configurada
-    (system + los últimos MAX_TURNS turnos + el turno nuevo), aunque la
-    sesión ya tenga más historial acumulado que eso."""
+    (system + [resumen, una vez que la compresión lo generó] + los últimos
+    MAX_TURNS turnos + el turno nuevo), aunque la sesión ya tenga más
+    historial acumulado que eso -- los turnos viejos se pliegan en el
+    resumen acumulativo en vez de mandarse crudos."""
     captured_message_counts: list[int] = []
 
     async def fake_acompletion(self, *args, **kwargs):
         messages = kwargs["messages"]
-        if METADATA_SYSTEM_MARKER in messages[0]["content"]:
+        system_content = messages[0]["content"]
+        if METADATA_SYSTEM_MARKER in system_content:
             mock_response = (
                 '{"project_name": null, "assumed_team_size": null, '
                 '"mentioned_technologies": [], "agreed_scope": null}'
             )
+        elif SUMMARIZER_SYSTEM_MARKER in system_content:
+            # No cuenta para la aserción de la ventana -- es la llamada de
+            # compresión, no una estimación real.
+            mock_response = _estimation_result_json()
         else:
             captured_message_counts.append(len(messages))
             mock_response = _estimation_result_json()
@@ -225,9 +259,149 @@ async def test_sliding_window_caps_messages_sent_to_llm():
                 )
                 assert response.status_code == 200
 
-    # system (1) + MAX_TURNS turnos previos (2 c/u) + el turno nuevo (1)
+    # system (1) + MAX_TURNS turnos previos (2 c/u) + el turno nuevo (1).
+    # El resumen (una vez que la compresión lo genera) no agrega un mensaje
+    # aparte: `to_messages_list` lo funde en el primer mensaje `user` para
+    # no romper la alternancia estricta user/assistant -- así que el techo
+    # no cambia aunque haya resumen acumulado.
     max_expected = 1 + settings.max_conversation_turns * 2 + 1
     assert max(captured_message_counts) <= max_expected
     # Y con 8 turnos (> MAX_TURNS=6 por defecto) el techo sí se alcanzó --
     # confirma que la ventana realmente recorta, no que nunca creció tanto.
     assert captured_message_counts[-1] == max_expected
+
+
+async def test_debug_endpoint_reflects_compression_and_tier():
+    """GET /sessions/{id} debe exponer lo que produjo la ventana
+    comprimida (mensajes activos, anclas, caracteres de resumen) y el
+    último tier resuelto, sin tener que re-correr nada."""
+
+    def script(messages: list[dict]) -> str:
+        system_content = messages[0]["content"]
+        if METADATA_SYSTEM_MARKER in system_content:
+            return (
+                '{"project_name": null, "assumed_team_size": null, '
+                '"mentioned_technologies": [], "agreed_scope": null}'
+            )
+        if SUMMARIZER_SYSTEM_MARKER in system_content:
+            return _estimation_result_json()
+        return _estimation_result_json()
+
+    fake = _scripted_acompletion(script)
+    with patch.object(svc.Router, "acompletion", new=fake):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            session_resp = await client.post("/api/v1/sessions")
+            session_id = session_resp.json()["session_id"]
+
+            info = await client.get(f"/api/v1/sessions/{session_id}")
+            assert info.status_code == 200
+            data = info.json()
+            assert data["message_count"] == 0
+            assert data["max_turns"] == settings.max_conversation_turns
+            assert data["anchors_count"] == 0
+            assert data["summary_chars"] == 0
+            assert data["last_resolved_tier"] is None
+
+            await client.post(
+                f"/api/v1/sessions/{session_id}/estimate",
+                data={"transcript": "Firmamos un NDA antes de compartir el alcance."},
+            )
+
+            info = await client.get(f"/api/v1/sessions/{session_id}")
+            data = info.json()
+            assert data["message_count"] == 1
+            assert data["last_resolved_tier"] == "executive"
+            assert data["last_tier_rule"] == "nda_detected"
+
+
+async def test_debug_endpoint_404_for_unknown_session():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/v1/sessions/does-not-exist")
+    assert response.status_code == 404
+
+
+async def test_acb_endpoint_accepts_on_first_pass():
+    """Critic acepta en la primera pasada: el Boss no debe pedir una
+    segunda iteración, y la traza debe reflejar exactamente 1 ronda."""
+
+    def script(messages: list[dict]) -> str:
+        system_content = messages[0]["content"]
+        if METADATA_SYSTEM_MARKER in system_content:
+            return (
+                '{"project_name": null, "assumed_team_size": null, '
+                '"mentioned_technologies": [], "agreed_scope": null}'
+            )
+        if CRITIC_SYSTEM_MARKER in system_content:
+            return _critic_feedback_json("accept")
+        return _estimation_result_json()
+
+    fake = _scripted_acompletion(script)
+    with patch.object(svc.Router, "acompletion", new=fake):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            session_resp = await client.post("/api/v1/sessions")
+            session_id = session_resp.json()["session_id"]
+
+            response = await client.post(
+                f"/api/v1/sessions/{session_id}/estimate-acb",
+                data={"transcript": "El cliente es una clínica veterinaria."},
+            )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["acb"]["final_decision"] == "accept"
+    assert data["acb"]["iterations_run"] == 1
+    assert data["result"]["summary"] == "Resumen de la estimación de prueba."
+    assert data["history_turns"] == 1
+
+
+async def test_acb_endpoint_iterates_then_accepts():
+    """Critic pide una iteración, el segundo borrador (distinto texto) sí
+    es aceptado -- confirma que el feedback viaja de verdad al segundo
+    llamado del actor (vía el bloque <critic_feedback>)."""
+    actor_call_count = 0
+
+    def script(messages: list[dict]) -> str:
+        nonlocal actor_call_count
+        system_content = messages[0]["content"]
+        if METADATA_SYSTEM_MARKER in system_content:
+            return (
+                '{"project_name": null, "assumed_team_size": null, '
+                '"mentioned_technologies": [], "agreed_scope": null}'
+            )
+        if CRITIC_SYSTEM_MARKER in system_content:
+            # Primera revisión: pide iteración. Segunda: acepta.
+            user_content = messages[-1]["content"]
+            if "corregido" in user_content:
+                return _critic_feedback_json("accept")
+            return _critic_feedback_json("needs_iteration")
+        actor_call_count += 1
+        if actor_call_count == 1:
+            return _estimation_result_json(summary="Primer borrador con un error de aritmética.")
+        # El segundo llamado del actor debe recibir el feedback del critic
+        # tejido en el user message (ver <critic_feedback> en session_user.j2).
+        assert any("math_error" in m["content"] for m in messages)
+        return _estimation_result_json(summary="Segundo borrador, ya corregido.")
+
+    fake = _scripted_acompletion(script)
+    with patch.object(svc.Router, "acompletion", new=fake):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            session_resp = await client.post("/api/v1/sessions")
+            session_id = session_resp.json()["session_id"]
+
+            response = await client.post(
+                f"/api/v1/sessions/{session_id}/estimate-acb",
+                data={"transcript": "El cliente es una clínica veterinaria."},
+            )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["acb"]["final_decision"] == "accept"
+    assert data["acb"]["iterations_run"] == 2
+    assert data["result"]["summary"] == "Segundo borrador, ya corregido."
+    # El historial guarda el turno "limpio" -- sin el ruido del
+    # critic_feedback tejido en el prompt intermedio.
+    assert data["history_turns"] == 1

@@ -24,6 +24,21 @@ class Settings(BaseSettings):
     # activarla.
     semantic_cache_log_only: bool = False
 
+    # --- Compresión de historial (anclas + resumen) y tier dinámico ---
+    # Detector de anclas: "heuristic" (regex sobre frases clave) o "llm"
+    # (clasificador binario vía Instructor). Heuristic es el default por costo.
+    anchor_detection_mode: Literal["heuristic", "llm"] = "heuristic"
+    # Modelo barato para llamadas auxiliares (summarizer, anclas en modo
+    # "llm", Critic) -- siempre vía OpenAI, sin importar el proveedor
+    # primario de estimación.
+    compression_model: str = "gpt-4o-mini"
+    # Máximo de iteraciones que puede recorrer el Boss (cada iteración = 1
+    # llamada al actor + 1 al Critic). 3 es el piso práctico: un borrador
+    # inicial + dos reintentos dirigidos. Con solo 2, el actor suele no
+    # poder atender todos los issues marcados en el único reintento
+    # disponible, y el loop no converge.
+    boss_max_iterations: int = 3
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

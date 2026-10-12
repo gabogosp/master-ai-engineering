@@ -75,6 +75,29 @@ text (scope boundaries, dependencies, risks) — not just a generic sentence.
 {% endif %}
 </detail_level>
 
+<audience>
+{% if tier %}
+The resolved audience tier for this turn is "{{ tier.value }}". Adjust the
+tone and framing of `summary` and each phase's `summary` accordingly (the
+JSON shape itself never changes):
+{% if tier == "executive" %}
+This conversation involves NDA, regulatory, or other high-stakes context.
+Lead with the bottom line (cost, timeline, risk) in one or two sentences
+before any detail. Minimize technical jargon. Assume the reader has limited
+time and wants the business outcome, not the implementation.
+{% elif tier == "pm" %}
+This is a small team context. Frame phases as concrete deliverables with
+their dependencies and acceptance criteria made explicit — a PM should be
+able to turn each phase summary directly into a tracked milestone.
+{% elif tier == "developer" %}
+The conversation shows multiple technical keywords (infra, messaging,
+orchestration, etc.). It is safe to reference concrete implementation
+details (stack choices, architecture shape) in phase summaries — this
+audience wants engineering-grade specificity, not a business abstraction.
+{% endif %}
+{% endif %}
+</audience>
+
 <rules>
 - Base the estimate only on what the description (and any
   <project_description>/<turn_transcript> content) says. If important

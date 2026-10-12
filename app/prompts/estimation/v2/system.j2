@@ -63,6 +63,22 @@ Each phase summary lists its own assumptions and risks, not a generic line.
 {% endif %}
 </detail_level>
 
+<audience>
+{% if tier %}
+tier = "{{ tier.value }}":
+{% if tier == "executive" %}
+NDA/regulatory/high-stakes context. Lead with cost, timeline, risk in one
+line, minimal jargon — this reader wants the outcome, not the build.
+{% elif tier == "pm" %}
+Small team. Phase summaries read as trackable deliverables with explicit
+dependencies and acceptance criteria.
+{% elif tier == "developer" %}
+Technical audience detected. Fine to name stack/architecture specifics in
+phase summaries — engineering-grade, not a business abstraction.
+{% endif %}
+{% endif %}
+</audience>
+
 <rules>
 - Estimate strictly from the given description / transcript. Anything
   missing goes into the summary as a caveat — never invent it.
