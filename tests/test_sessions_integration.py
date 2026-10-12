@@ -6,6 +6,7 @@ import instructor
 import litellm
 import pytest
 from httpx import ASGITransport, AsyncClient
+from structlog.testing import capture_logs
 
 import app.services.llm_service as svc
 from app.config import settings
@@ -405,3 +406,118 @@ async def test_acb_endpoint_iterates_then_accepts():
     # El historial guarda el turno "limpio" -- sin el ruido del
     # critic_feedback tejido en el prompt intermedio.
     assert data["history_turns"] == 1
+
+
+async def test_turn_observed_event_carries_all_13_fields_and_turn_index_increments():
+    """Bloque 1 / Paso 1 del ejercicio de sesión 6: un único evento
+    turn_observed con los 13 campos, emitido justo antes del return de
+    /estimate -- no logs sueltos que haya que reconciliar por timestamp."""
+
+    def script(messages: list[dict]) -> str:
+        system_content = messages[0]["content"]
+        if METADATA_SYSTEM_MARKER in system_content:
+            return (
+                '{"project_name": null, "assumed_team_size": null, '
+                '"mentioned_technologies": [], "agreed_scope": null}'
+            )
+        return _estimation_result_json()
+
+    fake = _scripted_acompletion(script)
+    with patch.object(svc.Router, "acompletion", new=fake):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            session_resp = await client.post("/api/v1/sessions")
+            session_id = session_resp.json()["session_id"]
+
+            with capture_logs() as logs:
+                r1 = await client.post(
+                    f"/api/v1/sessions/{session_id}/estimate",
+                    data={"transcript": "El cliente es una clínica veterinaria."},
+                )
+            assert r1.status_code == 200
+
+            with capture_logs() as logs2:
+                r2 = await client.post(
+                    f"/api/v1/sessions/{session_id}/estimate",
+                    data={"transcript": "También quieren un panel para el personal."},
+                )
+            assert r2.status_code == 200
+
+    def _find_turn_observed(captured):
+        matches = [e for e in captured if e.get("event") == "turn_observed"]
+        assert len(matches) == 1, f"se esperaba exactamente 1 turn_observed, hubo {len(matches)}"
+        return matches[0]
+
+    event1 = _find_turn_observed(logs)
+    event2 = _find_turn_observed(logs2)
+
+    expected_fields = {
+        "turn_index",
+        "session_id",
+        "enriched_transcript_chars",
+        "attachments_total_chars",
+        "messages_in_window",
+        "anchors_count",
+        "summary_chars",
+        "tokens_in",
+        "tokens_out",
+        "cost_usd",
+        "latency_ms",
+        "cache_hit_kind",
+        "last_resolved_tier",
+    }
+    assert expected_fields.issubset(event1.keys())
+
+    # Monótono: nunca baja, aunque la ventana comprima en sesiones largas.
+    assert event1["turn_index"] == 1
+    assert event2["turn_index"] == 2
+    assert event2["messages_in_window"] == 4  # 2 pares tras el segundo turno
+    assert event1["cache_hit_kind"] == "none"  # nunca "semantic" en el flujo conversacional
+
+
+async def test_turn_observed_fires_for_acb_too_and_shares_the_turn_counter():
+    """EstimationService._log_turn_observed es compartido entre
+    estimate_conversational y estimate_with_acb -- antes del refactor a
+    EstimationService, el endpoint ACB no emitía turn_observed porque la
+    consigna original de Bloque 1 solo mencionaba el camino actor. Este
+    test fija que ahora sí, y que turn_index es un contador ÚNICO de la
+    sesión (no uno por endpoint)."""
+
+    def script(messages: list[dict]) -> str:
+        system_content = messages[0]["content"]
+        if METADATA_SYSTEM_MARKER in system_content:
+            return (
+                '{"project_name": null, "assumed_team_size": null, '
+                '"mentioned_technologies": [], "agreed_scope": null}'
+            )
+        if CRITIC_SYSTEM_MARKER in system_content:
+            return _critic_feedback_json("accept")
+        return _estimation_result_json()
+
+    fake = _scripted_acompletion(script)
+    with patch.object(svc.Router, "acompletion", new=fake):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            session_resp = await client.post("/api/v1/sessions")
+            session_id = session_resp.json()["session_id"]
+
+            with capture_logs() as logs_actor:
+                r1 = await client.post(
+                    f"/api/v1/sessions/{session_id}/estimate",
+                    data={"transcript": "El cliente es una clínica veterinaria."},
+                )
+            assert r1.status_code == 200
+
+            with capture_logs() as logs_acb:
+                r2 = await client.post(
+                    f"/api/v1/sessions/{session_id}/estimate-acb",
+                    data={"transcript": "También quieren un panel para el personal."},
+                )
+            assert r2.status_code == 200
+
+    actor_events = [e for e in logs_actor if e.get("event") == "turn_observed"]
+    acb_events = [e for e in logs_acb if e.get("event") == "turn_observed"]
+    assert len(actor_events) == 1
+    assert len(acb_events) == 1
+    assert actor_events[0]["turn_index"] == 1
+    assert acb_events[0]["turn_index"] == 2  # mismo contador, no reinicia por endpoint

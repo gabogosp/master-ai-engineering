@@ -131,6 +131,13 @@ class Session:
     # mostrarla sin tener que re-correr el resolver.
     last_resolved_tier: str | None = None
     last_tier_rule: str | None = None
+    # Contador monótono de turnos EXITOSOS de la sesión (1-based). A
+    # diferencia de len(history), que se achica cuando la ventana
+    # deslizante comprime, este nunca baja -- es "turno número N de esta
+    # sesión", no "cuántos mensajes hay ahora mismo en la ventana". Lo usa
+    # el evento turn_observed (ver app.routers.sessions) para el CSV de
+    # stress-testing.
+    turn_index: int = 0
 
 
 class SessionStore:

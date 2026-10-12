@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import Annotated
 
 import structlog
@@ -9,61 +8,44 @@ from app.attachments import (
     build_transcript_with_attachments,
     extract_text,
 )
-from app.boss import Boss
-from app.compression.policy import apply_compression
-from app.config import settings
-from app.critic import Critic
-from app.guardrails.input import InputGuardrailViolation, check_input
-from app.guardrails.output import enforce_scope_response
-from app.prompts.loader import render_session_prompt
+from app.guardrails.input import InputGuardrailViolation
 from app.schemas import (
     ACBResponse,
-    CriticFeedback,
     DetailLevel,
     EstimationResponse,
-    EstimationResult,
     OutputFormat,
     ProjectType,
     SessionCreatedResponse,
     SessionInfoResponse,
 )
+from app.services.estimation import estimation_service
 from app.services.llm_service import (
     CONFIGURATION_ERRORS,
     PROVIDER_ERRORS,
     RATE_LIMIT_ERRORS,
     EstimationValidationError,
-    generate_structured_conversation_turn,
 )
-from app.services.metadata_extraction import extract_and_merge_metadata
-from app.services.openai_client import get_openai_client
 from app.sessions import Session, session_store
-from app.tier_resolver import Tier, resolve_tier
+from app.tier_resolver import Tier
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["sessions"])
 
-PROMPT_VERSION = "v1"
 
+async def _resolve_session_and_enrich(
+    session_id: str, transcript: str, attachments: list[UploadFile] | None
+) -> tuple[Session, str, int]:
+    """Preludio HTTP compartido entre /estimate y /estimate-acb: busca la
+    sesión y extrae el texto de los adjuntos. A propósito NO hace nada de
+    negocio (ni guardrail de input, ni resolución de tier) -- eso vive en
+    EstimationService, que no sabe nada de UploadFile/HTTPException.
 
-async def _prepare_turn(
-    session_id: str,
-    transcript: str,
-    attachments: list[UploadFile] | None,
-    tier_override: Tier | None = None,
-) -> tuple[Session, str, Tier, str]:
-    """Preludio compartido entre /estimate y /estimate-acb: busca la
-    sesión, extrae los adjuntos, corre el guardrail de input sobre el
-    transcript ya enriquecido, y resuelve el tier de audiencia.
-
-    `tier_override`, si viene, gana siempre sobre la cadena de reglas (ver
-    app.tier_resolver.resolve_tier) -- lo usa, por ejemplo, el runner de
-    evals para fijar el tier esperado de un caso dorado en vez de confiar
-    en que la heurística lo derive sola.
-
-    Devuelve (session, full_transcript, resolved_tier, tier_rule). Lanza
-    HTTPException para los casos de sesión/adjunto -- el llamador maneja
-    los errores de LLM por separado, que difieren entre los dos endpoints.
+    Devuelve (session, full_transcript, attachments_total_chars). Este
+    último separado del total de full_transcript porque el evento
+    turn_observed (ver EstimationService) quiere poder distinguir "cuánto
+    aportó el transcript" de "cuánto aportaron los adjuntos" al armar las
+    curvas de carga por tamaño de adjunto.
     """
     session = session_store.get(session_id)
     if session is None:
@@ -77,30 +59,58 @@ async def _prepare_turn(
             raise HTTPException(status_code=422, detail=str(exc))
         attachment_texts.append((upload.filename or "adjunto", text))
 
+    attachments_total_chars = sum(len(text) for _, text in attachment_texts)
     full_transcript = build_transcript_with_attachments(transcript, attachment_texts)
+    return session, full_transcript, attachments_total_chars
 
-    # Guardrail de input sobre el transcript YA CON los adjuntos concatenados:
-    # un PDF/Word también puede traer PII o un intento de prompt-injection.
-    try:
-        await check_input(full_transcript, openai_client=get_openai_client())
-    except InputGuardrailViolation as exc:
+
+def _map_llm_errors(exc: Exception, *, session_id: str) -> HTTPException:
+    """Traduce las excepciones que deja propagar EstimationService a
+    códigos HTTP. Un único lugar para los dos endpoints (/estimate y
+    /estimate-acb), que antes de este refactor duplicaban exactamente
+    este mismo mapeo de 5 ramas."""
+    if isinstance(exc, InputGuardrailViolation):
         logger.info(
             "estimation_blocked_by_input_guardrail", reason=exc.reason, session_id=session_id
         )
-        raise HTTPException(
+        return HTTPException(
             status_code=400, detail={"reason": exc.reason, "message": exc.message}
         )
-
-    # Tier de audiencia: override explícito si vino, si no se deriva del
-    # transcript + la metadata acumulada. Se cachea en la sesión para que
-    # GET /sessions/{id} lo pueda mostrar sin recalcularlo.
-    resolved_tier, tier_rule = resolve_tier(
-        transcript=full_transcript, metadata=session.metadata, override=tier_override
-    )
-    session.last_resolved_tier = resolved_tier.value
-    session.last_tier_rule = tier_rule
-
-    return session, full_transcript, resolved_tier, tier_rule
+    if isinstance(exc, EstimationValidationError):
+        logger.warning(
+            "estimation_validation_exhausted", error=str(exc)[:300], session_id=session_id
+        )
+        return HTTPException(
+            status_code=502,
+            detail="El modelo no logró producir una estimación válida. Inténtalo de nuevo.",
+        )
+    if isinstance(exc, CONFIGURATION_ERRORS):
+        logger.error(
+            "llm_configuration_error",
+            error_type=type(exc).__name__,
+            session_id=session_id,
+            exc_info=True,
+        )
+        return HTTPException(status_code=500, detail="El servicio de LLM está mal configurado.")
+    if isinstance(exc, RATE_LIMIT_ERRORS):
+        logger.warning("llm_rate_limited", error_type=type(exc).__name__, session_id=session_id)
+        return HTTPException(
+            status_code=503,
+            detail="El proveedor de LLM no puede atender la petición ahora. Inténtalo más tarde.",
+        )
+    if isinstance(exc, PROVIDER_ERRORS):
+        logger.error(
+            "llm_provider_error",
+            error_type=type(exc).__name__,
+            session_id=session_id,
+            exc_info=True,
+        )
+        return HTTPException(
+            status_code=502, detail="No se pudo obtener respuesta del proveedor de LLM."
+        )
+    # No reconocida: la dejamos pasar tal cual -- FastAPI la convierte en
+    # un 500 genérico, y el traceback completo queda en el log del server.
+    raise exc
 
 
 @router.post("/sessions", response_model=SessionCreatedResponse)
@@ -136,96 +146,23 @@ async def estimate_turn(
     output_format: Annotated[OutputFormat | None, Form()] = None,
     tier: Annotated[Tier | None, Form()] = None,
 ) -> EstimationResponse:
-    session, full_transcript, resolved_tier, _tier_rule = await _prepare_turn(
-        session_id, transcript, attachments, tier_override=tier
+    session, full_transcript, attachments_total_chars = await _resolve_session_and_enrich(
+        session_id, transcript, attachments
     )
-
-    system, user = render_session_prompt(
-        full_transcript,
-        session.metadata,
-        version=PROMPT_VERSION,
-        tier=resolved_tier,
-        project_type=project_type,
-        detail_level=detail_level,
-        output_format=output_format,
-    )
-    messages = session.history.to_messages_list(system)
-    messages.append({"role": "user", "content": user})
-
-    # El detalle de cada fallo va al log. Al cliente solo le damos un mensaje genérico
-    # (mismo mapeo de errores que /api/v1/estimate).
     try:
-        structured = await generate_structured_conversation_turn(messages, EstimationResult)
-    except EstimationValidationError as exc:
-        logger.warning(
-            "estimation_validation_exhausted", error=str(exc)[:300], session_id=session_id
+        return await estimation_service.estimate_conversational(
+            session=session,
+            full_transcript=full_transcript,
+            attachments_total_chars=attachments_total_chars,
+            project_type=project_type,
+            detail_level=detail_level,
+            output_format=output_format,
+            tier_override=tier,
         )
-        raise HTTPException(
-            status_code=502,
-            detail="El modelo no logró producir una estimación válida. Inténtalo de nuevo.",
-        )
-    except CONFIGURATION_ERRORS as exc:
-        logger.error(
-            "llm_configuration_error",
-            error_type=type(exc).__name__,
-            session_id=session_id,
-            exc_info=True,
-        )
-        raise HTTPException(status_code=500, detail="El servicio de LLM está mal configurado.")
-    except RATE_LIMIT_ERRORS as exc:
-        logger.warning(
-            "llm_rate_limited", error_type=type(exc).__name__, session_id=session_id
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="El proveedor de LLM no puede atender la petición ahora. Inténtalo más tarde.",
-        )
-    except PROVIDER_ERRORS as exc:
-        logger.error(
-            "llm_provider_error",
-            error_type=type(exc).__name__,
-            session_id=session_id,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=502, detail="No se pudo obtener respuesta del proveedor de LLM."
-        )
-
-    result = enforce_scope_response(structured.result)
-
-    # El historial y el project_metadata se actualizan recién si la llamada
-    # al LLM salió bien -- un turno fallido no debe ensuciar la sesión.
-    # Guardamos el JSON del resultado estructurado como el turno del
-    # asistente (no un resumen en texto): así, en turnos futuros, el modelo
-    # ve exactamente qué fases y totales propuso y puede revisarlos con
-    # precisión en vez de tener que re-derivarlos de una prosa.
-    assistant_turn = result.model_dump_json()
-    session.history.add_turn(
-        {"role": "user", "content": user},
-        {"role": "assistant", "content": assistant_turn},
-    )
-    # La compresión (promoción a ancla + resumen acumulativo) es un paso
-    # explícito y posterior a `add_turn` -- ver app.compression.policy.
-    await apply_compression(
-        session.history,
-        anchor_detection_mode=settings.anchor_detection_mode,
-    )
-    session.metadata = await extract_and_merge_metadata(
-        full_transcript, assistant_turn, session.metadata
-    )
-
-    return EstimationResponse(
-        result=result,
-        prompt_version=PROMPT_VERSION,
-        model=structured.model,
-        provider=structured.provider,
-        input_tokens=structured.input_tokens,
-        output_tokens=structured.output_tokens,
-        created_at=datetime.now(timezone.utc),
-        cached=structured.cached,
-        project_metadata=session.metadata.model_dump(),
-        history_turns=len(session.history),
-    )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map_llm_errors(exc, session_id=session_id) from exc
 
 
 @router.post("/sessions/{session_id}/estimate-acb", response_model=ACBResponse)
@@ -248,113 +185,20 @@ async def estimate_turn_acb(
     desde el punto de vista del usuario, el turno produjo un único mensaje
     del asistente.
     """
-    session, full_transcript, resolved_tier, _tier_rule = await _prepare_turn(
-        session_id, transcript, attachments, tier_override=tier
+    session, full_transcript, attachments_total_chars = await _resolve_session_and_enrich(
+        session_id, transcript, attachments
     )
-
-    # Metadata (model/provider/tokens) de la ÚLTIMA llamada real al actor --
-    # el Boss solo devuelve el EstimationResult final, así que la capturamos
-    # por closure para poder reportarla en la respuesta.
-    last_structured = None
-
-    async def _actor(critic_feedback: CriticFeedback | None) -> EstimationResult:
-        nonlocal last_structured
-        system, user = render_session_prompt(
-            full_transcript,
-            session.metadata,
-            version=PROMPT_VERSION,
-            tier=resolved_tier,
-            critic_feedback=critic_feedback,
+    try:
+        return await estimation_service.estimate_with_acb(
+            session=session,
+            full_transcript=full_transcript,
+            attachments_total_chars=attachments_total_chars,
             project_type=project_type,
             detail_level=detail_level,
             output_format=output_format,
+            tier_override=tier,
         )
-        messages = session.history.to_messages_list(system)
-        messages.append({"role": "user", "content": user})
-        structured = await generate_structured_conversation_turn(messages, EstimationResult)
-        last_structured = structured
-        return enforce_scope_response(structured.result)
-
-    critic = Critic()
-
-    async def _critic(draft: EstimationResult) -> CriticFeedback:
-        return await critic.review(
-            transcript=full_transcript,
-            metadata=session.metadata,
-            tier=resolved_tier,
-            result=draft,
-        )
-
-    # Mismo mapeo de errores que /estimate -- cualquier excepción de LLM
-    # dentro del actor sube sin que el Boss la intercepte.
-    try:
-        boss = Boss(max_iterations=settings.boss_max_iterations)
-        final_result, trace = await boss.run(actor=_actor, critic=_critic)
-    except EstimationValidationError as exc:
-        logger.warning(
-            "estimation_validation_exhausted", error=str(exc)[:300], session_id=session_id
-        )
-        raise HTTPException(
-            status_code=502,
-            detail="El modelo no logró producir una estimación válida. Inténtalo de nuevo.",
-        )
-    except CONFIGURATION_ERRORS as exc:
-        logger.error(
-            "llm_configuration_error",
-            error_type=type(exc).__name__,
-            session_id=session_id,
-            exc_info=True,
-        )
-        raise HTTPException(status_code=500, detail="El servicio de LLM está mal configurado.")
-    except RATE_LIMIT_ERRORS as exc:
-        logger.warning(
-            "llm_rate_limited", error_type=type(exc).__name__, session_id=session_id
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="El proveedor de LLM no puede atender la petición ahora. Inténtalo más tarde.",
-        )
-    except PROVIDER_ERRORS as exc:
-        logger.error(
-            "llm_provider_error",
-            error_type=type(exc).__name__,
-            session_id=session_id,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=502, detail="No se pudo obtener respuesta del proveedor de LLM."
-        )
-
-    assert last_structured is not None  # boss.run siempre llama al actor al menos una vez
-
-    # El historial guarda un turno "limpio" (sin el feedback del Critic
-    # tejido adentro) -- el ruido de la orquestación ACB no debe viajar a
-    # turnos futuros, solo el resultado final.
-    _, canonical_user = render_session_prompt(
-        full_transcript, session.metadata, version=PROMPT_VERSION, tier=resolved_tier
-    )
-    assistant_turn = final_result.model_dump_json()
-    session.history.add_turn(
-        {"role": "user", "content": canonical_user},
-        {"role": "assistant", "content": assistant_turn},
-    )
-    await apply_compression(
-        session.history, anchor_detection_mode=settings.anchor_detection_mode
-    )
-    session.metadata = await extract_and_merge_metadata(
-        full_transcript, assistant_turn, session.metadata
-    )
-
-    return ACBResponse(
-        result=final_result,
-        prompt_version=PROMPT_VERSION,
-        model=last_structured.model,
-        provider=last_structured.provider,
-        input_tokens=last_structured.input_tokens,
-        output_tokens=last_structured.output_tokens,
-        created_at=datetime.now(timezone.utc),
-        cached=last_structured.cached,
-        project_metadata=session.metadata.model_dump(),
-        history_turns=len(session.history),
-        acb=trace,
-    )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map_llm_errors(exc, session_id=session_id) from exc

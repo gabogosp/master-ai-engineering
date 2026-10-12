@@ -403,15 +403,18 @@ master-ai-engineering/
 │   │   ├── conversation_summary/v1/ # Templates del summarizer acumulativo
 │   │   └── critic/v1/             # Templates del Critic
 │   ├── routers/
-│   │   ├── estimations.py         # POST /estimate (guardrails + cache semántica + Instructor)
-│   │   └── sessions.py            # POST /sessions, /estimate, /estimate-acb, GET /sessions/{id}
+│   │   ├── estimations.py         # POST /estimate (guardrails + cache semántica + Instructor) -- router delgado + lógica juntos, ver nota abajo
+│   │   └── sessions.py            # POST /sessions, GET /sessions/{id} -- delgado, delega /estimate y /estimate-acb a EstimationService
 │   └── services/
+│       ├── estimation.py          # EstimationService: orquesta el turno conversacional (actor + ACB), separado de FastAPI/HTTPException
 │       ├── llm_service.py         # Wrapper LiteLLM: fallback, cache exact-match, Instructor, multi-turno, grupo auxiliar. Cada llamada devuelve model/provider/tokens/latency_ms/cost_usd (0.0 en cache hit)
 │       ├── openai_client.py       # Cliente OpenAI compartido (moderación, embeddings)
 │       ├── semantic_cache.py      # Cache semántica: redisvl + Redis Stack
 │       ├── metadata_extraction.py # Segunda llamada al LLM que extrae project_metadata
 │       └── cache.py                # Cache exact-match sobre Redis
 ```
+
+> **Nota de arquitectura:** `EstimationService` cubre *solo* el camino conversacional (`/estimate`, `/estimate-acb`) -- es un refactor deliberadamente incremental, no una migración completa. El formulario de un solo turno (`estimations.py`) se queda con la orquestación inline por ahora; se migra a un service propio cuando lo toque un paso concreto de la consigna, no antes, para no arriesgar código ya estable sin necesidad real.
 
 ## Tests
 
@@ -427,7 +430,7 @@ Todos corren con mocks de LLM (sin API keys reales para generar estimaciones) y 
 - **Cache semántica** (`test_semantic_cache.py`, contra Redis Stack real con un vectorizer fake controlado a mano): bucket determinístico y sensible a cada campo; hit con texto parecido en el mismo bucket; miss con texto no relacionado; miss cruzando buckets aunque el texto sea idéntico; `log_only` nunca sirve un hit.
 - Templates de prompt (`v1` y `v2`): contenido literal de la descripción, bloques condicionales mutuamente excluyentes, `reference_projects`, versión inexistente, semántica de `StrictUndefined`, prompt de sesión (metadata vacía/poblada, instrucción de ajustar alcance solo en el flujo conversacional).
 - Streamlit (`AppTest`) con `httpx.MockTransport`: formulario, respuesta estructurada, validación, turno conversacional.
-- **Integración de sesiones** (`test_sessions_integration.py`, con `httpx.AsyncClient` sobre la app vía `ASGITransport`): `project_metadata` se actualiza y se fusiona a través de dos turnos; el contenido de un PDF adjunto efectivamente llega al LLM; la ventana deslizante nunca manda más de `MAX_CONVERSATION_TURNS` turnos al modelo (contando el resumen fusionado) aunque la sesión tenga más historial acumulado; `GET /sessions/{id}` refleja la compresión y el tier; `/estimate-acb` acepta en la primera pasada y, por separado, itera con el feedback del Critic realmente tejido en el segundo prompt del actor.
+- **Integración de sesiones** (`test_sessions_integration.py`, con `httpx.AsyncClient` sobre la app vía `ASGITransport`): `project_metadata` se actualiza y se fusiona a través de dos turnos; el contenido de un PDF adjunto efectivamente llega al LLM; la ventana deslizante nunca manda más de `MAX_CONVERSATION_TURNS` turnos al modelo (contando el resumen fusionado) aunque la sesión tenga más historial acumulado; `GET /sessions/{id}` refleja la compresión y el tier; `/estimate-acb` acepta en la primera pasada y, por separado, itera con el feedback del Critic realmente tejido en el segundo prompt del actor; el evento `turn_observed` (vía `structlog.testing.capture_logs`) trae los 13 campos y `turn_index` es un contador único de la sesión, compartido entre `/estimate` y `/estimate-acb`.
 - **Tier dinámico** (`test_tier_resolver.py`): cada regla de la cadena (NDA, regulatorio, keywords técnicas, equipo chico), precedencia entre reglas, override explícito.
 - **Compresión** (`test_compression.py`): el detector heurístico de anclas matchea/no matchea; la política no hace nada bajo el tope, evicta a resumen o promueve a ancla según corresponda, es idempotente.
 - **`ConversationHistory`** (`test_sessions.py`): `to_messages_list` nunca deja dos mensajes del mismo rol consecutivos (el resumen se fusiona, no se agrega aparte).
