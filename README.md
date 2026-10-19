@@ -86,7 +86,7 @@ uv run uvicorn app.main:app --reload
 
 La documentación interactiva (Swagger) queda en http://localhost:8000/docs.
 
-Alternativa containerizada (desde sesión 7): `docker compose up -d` levanta Redis **y** el servicio IA (`servicio_ia` en `docker-compose.yml`) en un solo paso, sin necesidad de `uv run` en el host. Útil sobre todo para correr `scripts/compare.py` dentro del contenedor (ver sección "Embedding pipeline").
+Alternativa containerizada: `docker compose up -d` levanta Redis **y** el servicio IA (`servicio_ia` en `docker-compose.yml`) en un solo paso, sin necesidad de `uv run` en el host. Útil sobre todo para correr `scripts/compare.py` dentro del contenedor (ver sección "Embedding pipeline").
 
 **3. Cliente web (Streamlit)** — es un cliente HTTP real del servicio IA (necesita el paso anterior corriendo):
 
@@ -351,15 +351,15 @@ uv run python -m evals.run --mode actor --output /tmp/report.json
 uv run python -m evals.run --mode actor --http http://localhost:8000  # contra un server real en vez de in-process
 ```
 
-El dataset cubre deliberadamente los bordes: casos out-of-scope (vago y adversarial/prompt-injection — un 400 del guardrail de input cuenta como el resultado esperado), los tres tiers no-default, y un caso de deadline ajustado. Una corrida contra la API real (`--mode actor`, sin filtrar) deja hoy **5/16 casos pasando las tres métricas** — el framework está cumpliendo su propósito de sesión 6: producir una baseline cuantitativa del CAG *antes* de comparar contra RAG en el directo. La mayoría de los fallos son el mismo bug de aritmética de Instructor ya documentado (4-5 casos agotan los reintentos), y el resto son casos límite de calibración de costo/duración y de recall de contenido — señal real, no ruido del framework.
+El dataset cubre deliberadamente los bordes: casos out-of-scope (vago y adversarial/prompt-injection — un 400 del guardrail de input cuenta como el resultado esperado), los tres tiers no-default, y un caso de deadline ajustado. Una corrida contra la API real (`--mode actor`, sin filtrar) deja hoy **5/16 casos pasando las tres métricas** — el framework está cumpliendo su propósito: producir una baseline cuantitativa del CAG antes de comparar contra otras arquitecturas (ver "Stress-test del CAG" más abajo). La mayoría de los fallos son el mismo bug de aritmética de Instructor ya documentado (4-5 casos agotan los reintentos), y el resto son casos límite de calibración de costo/duración y de recall de contenido — señal real, no ruido del framework.
 
 Un README específico de evals no existe a propósito: todo el diseño vive en los docstrings de `evals/dataset.py`, `evals/metrics.py` y `evals/run.py`.
 
 ### Stress-test del CAG (`evals/stress/`)
 
-Construido bloque a bloque sobre la consigna de sesión 6 ("instrumentá tu CAG antes de ver RAG en el directo"). Componentes:
+Instrumenta el CAG y lo somete a tres escenarios de carga (multi-turno largo, adjuntos grandes, variación de tamaño) para tener un baseline cuantitativo antes de comparar contra otras arquitecturas (ej. RAG). Componentes:
 
-- **`turn_observed`**: el evento unificado por turno que alimenta el futuro `results.csv`. Desde el Bloque 4 ya no es solo un log: se construye como un objeto típado `TurnObservation` (Pydantic, `app/schemas.py`) que `EstimationService` loguea (`logger.info("turn_observed", **observation.model_dump())`) Y adjunta a la respuesta HTTP (`EstimationResponse.observation`, heredado por `ACBResponse`) — así el futuro runner de stress lo lee directo del JSON de la respuesta, sin tener que parsear logs con `capture_logs`.
+- **`turn_observed`**: el evento unificado por turno que alimenta `evals/stress/results.csv`. No es solo un log: se construye como un objeto típado `TurnObservation` (Pydantic, `app/schemas.py`) que `EstimationService` loguea (`logger.info("turn_observed", **observation.model_dump())`) Y adjunta a la respuesta HTTP (`EstimationResponse.observation`, heredado por `ACBResponse`) — así el futuro runner de stress lo lee directo del JSON de la respuesta, sin tener que parsear logs con `capture_logs`.
 - **`evals/stress/scenarios.py`**: tres perfiles de conversación sintética, cada uno con al menos 20 turnos guionados y un *fact-tracker* por turno (qué hecho debería sobrevivir en llamadas posteriores):
   - `growing` — el proyecto acumula requisitos sin parar; estresa si el nombre del proyecto (turno 1) sobrevive hasta el turno 20 como ancla o dentro del resumen.
   - `pivot` — el turno 5 cambia el stack (React Native → Flutter); prueba si `mentioned_technologies` acumula ambas tecnologías (comportamiento esperado) o pierde la primera (drift).
@@ -368,13 +368,13 @@ Construido bloque a bloque sobre la consigna de sesión 6 ("instrumentá tu CAG 
 - **`evals/stress/metrics.py`**: tres métricas nuevas, en un módulo separado de `evals/metrics.py` porque operan sobre otro shape (`TurnObservation`/snapshot de sesión, no `(GoldenCase, EstimationResult)`) aunque reusan el mismo `MetricResult`:
   - `LatencyBudgetMetric(budget_ms)` / `CostBudgetMetric(budget_usd)` — evalúan un `TurnObservation` contra un presupuesto fijo.
   - `MemoryDriftMetric(fact, fact_field)` — evalúa el snapshot de `GET /sessions/{id}` buscando si un hecho sigue siendo recuperable (substring case-insensitive) en `metadata.project_name`/`mentioned_technologies`/`agreed_scope`, en `summary` (texto del resumen acumulado — campo agregado a `SessionInfoResponse` en este bloque, antes solo exponía `summary_chars`), en `anchors` (texto de los mensajes promovidos a ancla, no solo `anchors_count` — mismo motivo, agregado también acá), o en el snapshot completo (`fact_field="any"`).
-- **`evals/stress/run.py`**: el runner que corre los 3 escenarios × 5 tamaños de adjunto × N repeticiones contra sesiones reales (in-process por defecto vía `httpx.AsyncClient` + `ASGITransport`, con `--concurrency` para no tardar horas; `--http BASE` para apuntar a un server real) y vuelca una fila de CSV por turno a `evals/stress/results.csv`. El adjunto se sube solo en el primer turno de cada conversación (el texto extraído queda tejido en el historial persistido desde ese turno, así que repetirlo en los 20 solo multiplicaría el costo). No hace falta truncar a N ∈ {1,3,6,10,20} como el Bloque 2: cada conversación corre sus 20 turnos una sola vez y el propio `turn_index` de cada fila es la N de la curva de recall.
+- **`evals/stress/run.py`**: el runner que corre los 3 escenarios × 5 tamaños de adjunto × N repeticiones contra sesiones reales (in-process por defecto vía `httpx.AsyncClient` + `ASGITransport`, con `--concurrency` para no tardar horas; `--http BASE` para apuntar a un server real) y vuelca una fila de CSV por turno a `evals/stress/results.csv`. El adjunto se sube solo en el primer turno de cada conversación (el texto extraído queda tejido en el historial persistido desde ese turno, así que repetirlo en los 20 solo multiplicaría el costo). No hace falta truncar a N ∈ {1,3,6,10,20} en corridas separadas: cada conversación corre sus 20 turnos una sola vez y el propio `turn_index` de cada fila es la N de la curva de recall.
 - **`evals/stress/report.py`**: genera `evals/stress/REPORT.md` a partir del CSV -- tabla resumen por escenario × tamaño de adjunto, tres curvas (latencia vs tokens, costo por turno acumulado vs turn_index, recall vs N) y dos párrafos de lectura calculados desde los datos reales (ningún número hardcodeado).
 - **`evals/stress/REPORT.md`**: el reporte de la corrida real completa (45 conversaciones intentadas, hasta 900 llamadas). Hallazgos: el recall del fact-tracker cae por debajo de 0.8 ya en el turno 2; solo 5/45 conversaciones (11%) llegan completas al turno 20, y los cortes se concentran en turnos específicos (6 de las conversaciones rotas del escenario `contradiction` fallan exactamente en el turno 8, el que le pide al modelo recalcular costos tras la corrección de presupuesto) más que distribuirse parejo -- la vía actor-sin-Critic/Boss que ejercita el runner es frágil ante ese tipo de turno en particular.
 
-## Embedding pipeline (sesión 7)
+## Embedding pipeline
 
-Primer paso hacia búsqueda semántica: convierte presupuestos históricos (`data/budgets_sample.json`, 15 presupuestos reales de fintech/e-commerce/healthcare/industrial) en chunks vectorizados. Todavía no se persiste en ninguna base vectorial (eso entra en sesión 8 con pgvector) -- los vectores se generan en memoria y se devuelven por HTTP.
+Primer paso hacia búsqueda semántica: convierte presupuestos históricos (`data/budgets_sample.json`, 15 presupuestos reales de fintech/e-commerce/healthcare/industrial) en chunks vectorizados. Todavía no se persiste en ninguna base vectorial (el siguiente paso natural es pgvector) -- los vectores se generan en memoria y se devuelven por HTTP.
 
 - **`app/embedding_pipeline/chunker.py`**: `JSONStructuralChunker` -- un componente de un presupuesto = un chunk, sin overlap ni splitting. El texto de cada chunk prepende el contexto del presupuesto padre (proyecto, sector, año, tecnología principal) al detalle del componente, para que un chunk aislado no pierda a qué cliente pertenece.
 - **`app/embedding_pipeline/embedder.py`**: `OpenAIEmbedder` sobre `text-embedding-3-small` (1536 dims). Cliente **síncrono** a propósito (no el `AsyncOpenAI` que ya usa `app.services.openai_client` para moderación) -- batching de hasta 100 chunks por llamada, reintento exponencial simple ante `RateLimitError` (1s/2s/4s), y `PRICE_PER_1M_INPUT_TOKENS_USD` como constante de módulo para estimar costo.
@@ -394,7 +394,7 @@ También se puede probar desde `/docs` (Swagger UI) pegando el contenido de `dat
 
 ### Cómo correr `compare.py`
 
-Este repo no containerizaba el servicio FastAPI hasta esta sesión (`docker-compose.yml` solo levantaba Redis) -- ahora existen las dos formas:
+Este repo no containerizaba el servicio FastAPI hasta que se agregó el embedding pipeline (`docker-compose.yml` solo levantaba Redis) -- ahora existen las dos formas:
 
 **Dentro del contenedor:**
 
@@ -418,7 +418,7 @@ uv run python scripts/compare.py \
 ```
 master-ai-engineering/
 ├── streamlit_app.py             # Cliente web (2 pestañas: formulario y conversación, las dos bloqueantes)
-├── Dockerfile                    # Imagen del servicio "servicio_ia" (sesión 7 -- antes solo corría con uv run)
+├── Dockerfile                    # Imagen del servicio "servicio_ia" (antes solo corría con uv run)
 ├── docker-compose.yml           # Redis Stack + servicio_ia
 ├── data/
 │   └── budgets_sample.json      # 15 presupuestos históricos reales (fintech/e-commerce/healthcare/industrial)
@@ -430,7 +430,7 @@ master-ai-engineering/
 │   ├── metrics.py                # SchemaAdherenceMetric, CostBoundsMetric, ContentRecallMetric
 │   ├── run.py                     # CLI: uv run python -m evals.run --mode actor|acb
 │   └── stress/
-│       ├── scenarios.py           # 3 perfiles multi-turno (growing/pivot/contradiction) para el stress-test de sesión 6
+│       ├── scenarios.py           # 3 perfiles multi-turno (growing/pivot/contradiction) para el stress-test del CAG
 │       └── fixtures/
 │           └── build_pdfs.py      # Genera 4 PDFs calibrados (5/20/50/100 KB de texto extraído) -- gitignoreados, se regeneran
 ├── tests/
@@ -504,7 +504,7 @@ master-ai-engineering/
 │       └── SANITY_CHECK.md        # Validación con las 3 parejas de referencia (coseno, sin numpy)
 ```
 
-> **Nota de arquitectura:** `EstimationService` cubre *solo* el camino conversacional (`/estimate`, `/estimate-acb`) -- es un refactor deliberadamente incremental, no una migración completa. El formulario de un solo turno (`estimations.py`) se queda con la orquestación inline por ahora; se migra a un service propio cuando lo toque un paso concreto de la consigna, no antes, para no arriesgar código ya estable sin necesidad real.
+> **Nota de arquitectura:** `EstimationService` cubre *solo* el camino conversacional (`/estimate`, `/estimate-acb`) -- es un refactor deliberadamente incremental, no una migración completa. El formulario de un solo turno (`estimations.py`) se queda con la orquestación inline por ahora; se migra a un service propio cuando una necesidad concreta lo justifique, no antes, para no arriesgar código ya estable sin necesidad real.
 
 ## Tests
 

@@ -1,7 +1,7 @@
-"""Endpoint POST /embeddings/ingest (sesión 7, Paso 5).
+"""Endpoint POST /embeddings/ingest.
 
-Handler declarado `def` normal, NO `async def` -- `embed_many` (Paso 4)
-hace una llamada SÍNCRONA y bloqueante a la API de OpenAI. Si este
+Handler declarado `def` normal, NO `async def` -- `embed_many` hace
+una llamada SÍNCRONA y bloqueante a la API de OpenAI. Si este
 handler fuera async, esa llamada bloquearía el único event loop del
 proceso mientras espera, congelando también las peticiones a
 /sessions/*. FastAPI corre los handlers `def` normales en un

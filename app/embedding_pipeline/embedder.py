@@ -1,10 +1,11 @@
-"""Embedder sobre la API de OpenAI (sesión 7, Paso 4).
+"""Embedder sobre la API de OpenAI.
 
 Usa un cliente SÍNCRONO (`openai.OpenAI`), no el `AsyncOpenAI` que ya
-expone app.services.openai_client para moderación -- el enunciado pide
-literalmente `def embed_one(...)` / `def embed_many(...)` sin
-`async def`, y mezclar un cliente async en un método sync solo para
-este módulo obligaría a correr un event loop anidado sin necesidad.
+expone app.services.openai_client para moderación: `embed_one`/
+`embed_many` se piensan como una interfaz simple y sync (útil también
+para un script de línea de comandos), y mezclar un cliente async en un
+método sync solo para este módulo obligaría a correr un event loop
+anidado sin necesidad.
 """
 
 import time
@@ -22,11 +23,12 @@ BATCH_SIZE = 100
 
 # Precio vigente al escribir este módulo -- CAMBIA con el tiempo, por
 # eso vive como constante nombrada y no como un número suelto dentro
-# del cálculo de costo (ver Paso 5, donde el router la usa para llenar
+# del cálculo de costo (el router la usa para llenar
 # IngestStats.estimated_cost_usd).
 PRICE_PER_1M_INPUT_TOKENS_USD = 0.02
 
-# 3 reintentos con esperas 1s, 2s, 4s -- el enunciado los pide exactos.
+# Reintento exponencial simple: 3 intentos adicionales con esperas de
+# 1s, 2s y 4s antes de rendirse.
 _RETRY_WAITS_SECONDS = (1, 2, 4)
 
 
@@ -49,8 +51,8 @@ class OpenAIEmbedder:
         return response.data[0].embedding
 
     def embed_many(self, chunks: list[Chunk]) -> list[EmbeddedChunk]:
-        """Llama a la API en batches (no una llamada por chunk) -- el
-        tamaño recomendado por el enunciado es 100 chunks por llamada."""
+        """Llama a la API en batches (no una llamada por chunk) -- hasta
+        100 chunks por llamada."""
         embedded: list[EmbeddedChunk] = []
         for start in range(0, len(chunks), BATCH_SIZE):
             batch = chunks[start : start + BATCH_SIZE]

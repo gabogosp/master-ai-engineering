@@ -1,6 +1,6 @@
-# Sanity check de embeddings (sesión 7, Paso 7)
+# Sanity check de embeddings
 
-Resultados reales de `scripts/compare.py` sobre `text-embedding-3-small`, contra las tres parejas exactas del enunciado.
+Resultados reales de `scripts/compare.py` sobre `text-embedding-3-small`, contra tres parejas de referencia (textos cercanos, no relacionados, y genéricos/ambiguos).
 
 | Pareja | Texto A | Texto B | Similitud coseno | Expectativa orientativa |
 |---|---|---|---|---|
@@ -14,4 +14,4 @@ Lo que más llama la atención: la Pareja A quedó **por debajo** del umbral ori
 
 La Pareja B confirma la expectativa con margen amplio (0.19, bien por debajo de 0.4): dos dominios técnicos sin relación semántica quedan claramente separados.
 
-La Pareja C es la más interesante para discutir en directo: dos frases genéricas y casi tautológicas ("Backend services" / "API development") dan una similitud moderada-alta (0.54), más cerca de la Pareja A que de la B. Esto sugiere que el modelo agrupa textos cortos y poco específicos en una región genérica del espacio de embeddings en vez de discriminarlos -- un presupuesto con descripciones de componente muy telegráficas (como el caso "QuickShop MVP" que el profesor reservó para la sesión en vivo, ver nota del Paso 1) probablemente genere chunks difíciles de distinguir entre sí por similitud semántica pura.
+La Pareja C es la más interesante para seguir investigando: dos frases genéricas y casi tautológicas ("Backend services" / "API development") dan una similitud moderada-alta (0.54), más cerca de la Pareja A que de la B. Esto sugiere que el modelo agrupa textos cortos y poco específicos en una región genérica del espacio de embeddings en vez de discriminarlos -- un presupuesto con descripciones de componente muy telegráficas (de una sola línea, sin detalle técnico) probablemente genere chunks difíciles de distinguir entre sí por similitud semántica pura.

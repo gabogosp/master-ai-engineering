@@ -1,4 +1,4 @@
-# Stress-test del CAG -- Reporte (sesión 6, Bloque 5/6)
+# Stress-test del CAG -- Reporte
 
 351 filas (una por turno completado), 45 conversaciones intentadas,
 5 completas (11%).

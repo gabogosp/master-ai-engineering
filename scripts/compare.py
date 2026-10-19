@@ -1,13 +1,13 @@
-"""CLI de similitud coseno entre dos textos (sesión 7, Paso 6).
+"""CLI de similitud coseno entre dos textos.
 
 Uso::
 
     uv run python scripts/compare.py --text-a "..." --text-b "..."
 
-Reusa `OpenAIEmbedder.embed_one` (Paso 4). La similitud coseno se
-calcula a mano -- producto escalar sobre producto de normas -- con la
-biblioteca estándar; el enunciado pide explícitamente no importar
-numpy ni scikit-learn solo para esto.
+Reusa `OpenAIEmbedder.embed_one`. La similitud coseno se calcula a mano
+-- producto escalar sobre producto de normas -- con la biblioteca
+estándar, sin numpy ni scikit-learn, para no sumar una dependencia
+pesada solo para esto.
 """
 
 import argparse
@@ -15,12 +15,11 @@ import math
 import sys
 from pathlib import Path
 
-# El enunciado pide invocar este script como archivo plano
-# ("python scripts/compare.py", no "python -m scripts.compare"), lo
-# que deja `scripts/` -- no la raíz del repo -- como primera entrada de
-# sys.path. Sin este ajuste, `from app...` falla con ModuleNotFoundError
-# en cuanto se invoca tal cual lo pide el enunciado. Mismo truco que usa
-# uvicorn internamente al cargar "app.main:app" por string.
+# Invocar este script como archivo plano ("python scripts/compare.py",
+# no "python -m scripts.compare") deja `scripts/` -- no la raíz del
+# repo -- como primera entrada de sys.path. Sin este ajuste, `from
+# app...` falla con ModuleNotFoundError. Mismo truco que usa uvicorn
+# internamente al cargar "app.main:app" por string.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.embedding_pipeline.embedder import OpenAIEmbedder  # noqa: E402

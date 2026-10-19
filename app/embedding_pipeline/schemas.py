@@ -1,22 +1,21 @@
-"""Modelos Pydantic del pipeline de embeddings (sesión 7, Paso 2).
+"""Modelos Pydantic del pipeline de embeddings.
 
 Mismo patrón que app/schemas.py: Pydantic v2, `Field` con validaciones
 explícitas donde el dominio lo permite, docstrings explicando el
-PORQUÉ. Los nombres de campos van en inglés (lo pide el enunciado
-explícitamente) aunque los comentarios siguen en español como el resto
-del repo.
+PORQUÉ. Los nombres de campos van en inglés aunque los comentarios
+siguen en español como el resto del repo.
 """
 
 from pydantic import BaseModel, Field
 from typing import Literal
 
-# Universo cerrado SOLO para el sample de 15 presupuestos de esta sesión
-# (ver data/budgets_sample.json) -- `sector` y `complexity` son
+# Universo cerrado SOLO para el sample de presupuestos actual (ver
+# data/budgets_sample.json) -- `sector` y `complexity` son
 # clasificaciones acotadas a propósito (4 y 3 valores respectivamente).
 # `country` y `main_technology` se dejan como `str` libre: son campos
 # abiertos en el mundo real (código ISO de país, cualquier stack
 # tecnológico nuevo) y cerrarlos con un Literal rompería apenas el
-# dataset creciera en la sesión en vivo.
+# dataset crezca con presupuestos nuevos.
 Sector = Literal["ecommerce", "finance", "healthcare", "industrial"]
 Complexity = Literal["low", "medium", "high"]
 
@@ -28,8 +27,8 @@ class ClientMetadata(BaseModel):
 
 
 class BudgetComponent(BaseModel):
-    """Un componente de un presupuesto -- la unidad que, en el Paso 3,
-    se convierte 1:1 en un Chunk."""
+    """Un componente de un presupuesto -- la unidad que el chunker
+    convierte 1:1 en un Chunk."""
 
     component_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -52,10 +51,10 @@ class Budget(BaseModel):
 
 class ChunkMetadata(BaseModel):
     """Campos filtrables que viajan con el chunk pero NO se embeben --
-    sirven para cuando en sesión 8 (pgvector) se quiera filtrar por
-    sector/tecnología/año antes de buscar por similitud. Son
-    literalmente los que pide el Paso 3, tipados en vez de un dict
-    suelto para no arriesgar un typo en una clave que nadie valida."""
+    sirven para cuando haya una base vectorial (pgvector) y se quiera
+    filtrar por sector/tecnología/año antes de buscar por similitud.
+    Tipados en vez de un dict suelto para no arriesgar un typo en una
+    clave que nadie valida."""
 
     budget_id: str
     component_id: str
@@ -79,8 +78,8 @@ class Chunk(BaseModel):
 
 class EmbeddedChunk(Chunk):
     """`Chunk` + el vector. 1536 floats porque text-embedding-3-small
-    se usa con la dimensión por defecto (el enunciado pide explícitamente
-    NO forzar una dimensión menor en este ejercicio)."""
+    se usa con la dimensión por defecto -- no se fuerza una dimensión
+    menor (Matryoshka) acá."""
 
     embedding: list[float] = Field(min_length=1536, max_length=1536)
 

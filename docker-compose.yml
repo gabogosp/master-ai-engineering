@@ -7,10 +7,8 @@ services:
     ports:
       - "6379:6379"
 
-  # Nombrado "servicio_ia" literal porque el enunciado de sesión 7 lo
-  # invoca así ("docker compose exec servicio_ia ...", "docker compose
-  # build servicio_ia") -- hasta ahora este repo solo corría con
-  # `uv run` directo, nunca se había containerizado el FastAPI.
+  # Hasta ahora este repo solo corría con `uv run` directo, nunca se
+  # había containerizado el FastAPI.
   servicio_ia:
     build:
       context: .

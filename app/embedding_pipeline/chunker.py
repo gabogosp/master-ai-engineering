@@ -1,11 +1,11 @@
-"""Chunker estructural para presupuestos JSON (sesión 7, Paso 3).
+"""Chunker estructural para presupuestos JSON.
 
 Granularidad: un componente de un presupuesto = un chunk. No hay
-overlap ni fixed-size splitting de las descripciones largas -- el
-enunciado lo pide explícitamente así: la estructura del JSON ya da la
-unidad de chunk, partirla a mano sería reinventar lo que recursive/
-semantic chunking resuelven de forma más general, y eso está fuera de
-scope de este ejercicio (se compara en la sesión en vivo).
+overlap ni fixed-size splitting de las descripciones largas: la
+estructura del JSON ya da la unidad de chunk natural, así que partirla
+a mano sería reinventar lo que recursive/semantic chunking resuelven
+de forma más general -- eso queda para cuando haga falta comparar
+estrategias de chunking más sofisticadas.
 """
 
 import tiktoken
@@ -50,10 +50,10 @@ class JSONStructuralChunker:
     @staticmethod
     def _render_text(budget: Budget, component: BudgetComponent) -> str:
         """El contexto del presupuesto padre va ANTES del detalle del
-        componente a propósito (contextual chunk header, ver artículo 3
-        del material async): sin él, un chunk como "Authentication
-        backend" pierde la pista de a qué cliente/sector/stack
-        pertenece en cuanto se lo separa de sus hermanos."""
+        componente a propósito (contextual chunk header): sin él, un
+        chunk como "Authentication backend" pierde la pista de a qué
+        cliente/sector/stack pertenece en cuanto se lo separa de sus
+        hermanos."""
         tech_stack = ", ".join(component.tech_stack)
         return (
             f"[Project: {budget.project_summary}]\n"

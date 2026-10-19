@@ -1,8 +1,8 @@
-# Imagen del servicio IA (sesión 7, Paso 6/Entregable) -- este repo
-# nunca había containerizado el FastAPI (docker-compose.yml solo
-# levantaba Redis) porque hasta ahora todo corría con `uv run` directo.
-# Se agrega acá para que las dos formas de invocar scripts/compare.py
-# que pide el enunciado existan de verdad, no solo la de `uv run`.
+# Imagen del servicio IA -- este repo no había containerizado el
+# FastAPI (docker-compose.yml solo levantaba Redis) porque hasta ahora
+# todo corría con `uv run` directo. Se agrega para poder invocar
+# scripts/compare.py (y el resto del servicio) también dentro de un
+# contenedor, no solo vía `uv run` en el host.
 FROM python:3.13-slim
 
 # Copia el binario oficial de uv en vez de instalarlo con pip -- evita
@@ -23,9 +23,9 @@ COPY . .
 RUN uv sync --frozen
 
 # `uv sync` instala en /app/.venv, no en el Python de sistema. Sin esto,
-# `docker compose exec servicio_ia python scripts/compare.py ...` (el
-# comando LITERAL que pide el enunciado, sin `uv run`) ejecuta el
-# Python de sistema, que no tiene ninguna dependencia instalada.
+# `docker compose exec servicio_ia python scripts/compare.py ...` (sin
+# `uv run` delante) ejecuta el Python de sistema, que no tiene ninguna
+# dependencia instalada.
 ENV PATH="/app/.venv/bin:${PATH}"
 
 EXPOSE 8000

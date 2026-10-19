@@ -63,8 +63,8 @@ class SessionInfoResponse(BaseModel):
     # buscar un hecho dentro del resumen comprimido, no solo contarlo.
     summary: str | None = None
     # Texto de los mensajes promovidos a ancla, no solo `anchors_count` --
-    # un hecho declarado en sesión 6 (Bloque 2) puede sobrevivir SOLO
-    # dentro de un ancla (ni en el resumen ni en metadata), y
+    # un hecho de un turno anterior puede sobrevivir SOLO dentro de un
+    # ancla (ni en el resumen ni en metadata), y
     # MemoryDriftMetric con fact_field="any" solo puede verlo si el texto
     # de la ancla efectivamente viaja en este snapshot.
     anchors: list[str] = Field(default_factory=list)
@@ -135,8 +135,9 @@ class EstimationResult(BaseModel):
 
 
 class TurnObservation(BaseModel):
-    """Telemetría unificada de un turno conversacional (sesión 6, Bloque
-    1/4 de evals/stress). Se construye una sola vez en EstimationService,
+    """Telemetría unificada de un turno conversacional, pensada para
+    alimentar el stress-test en evals/stress/. Se construye una sola vez
+    en EstimationService,
     se loguea (`logger.info("turn_observed", **observation.model_dump())`)
     Y se adjunta a la respuesta -- el runner de stress la lee directo del
     JSON, sin tener que parsear logs con `capture_logs`.

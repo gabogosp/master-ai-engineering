@@ -1,12 +1,10 @@
-"""Genera los PDFs sintéticos calibrados para el runner de stress
-(Bloque 3 / Paso 3).
+"""Genera los PDFs sintéticos calibrados para el runner de stress.
 
 Produce `attach_{5,20,50,100}kb.pdf` en esta misma carpeta, donde el
 sufijo refiere al TAMAÑO DEL TEXTO EXTRAÍDO (lo que `pypdf` va a sacar de
 ahí) y no al tamaño del archivo en disco -- al runner le importa cuánto le
-suma al prompt, no cuántos bytes pesa el PDF. El attachment de "0 KB" de
-la consigna no es un archivo: es directamente no adjuntar nada, así que
-acá no se genera.
+suma al prompt, no cuántos bytes pesa el PDF. El tamaño "0 KB" no es un
+archivo: es directamente no adjuntar nada, así que acá no se genera.
 
 El generador es determinístico: mismo párrafo, mismo patrón de repetición
 por tamaño. Correrlo de nuevo produce PDFs idénticos byte a byte -- por

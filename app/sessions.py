@@ -144,10 +144,10 @@ class SessionStore:
     """Las sesiones viven en un diccionario del proceso -- sin base de
     datos ni Redis. Se pierden al reiniciar el servicio.
 
-    Es una volatilidad aceptada a propósito en esta fase: la consigna
-    excluye explícitamente la persistencia entre reinicios ("un
-    diccionario en memoria del proceso es suficiente para esta fase").
-    Si el servicio corre con más de un worker, cada worker tendría su
+    Es una volatilidad aceptada a propósito en esta fase: un diccionario
+    en memoria del proceso alcanza para el alcance actual, sin necesidad
+    de persistencia entre reinicios todavía. Si el servicio corre con
+    más de un worker, cada worker tendría su
     propio diccionario -- fuera de alcance acá, se resolvería con un
     store compartido (Redis) cuando haga falta.
     """

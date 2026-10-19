@@ -47,8 +47,8 @@ def test_contradiction_scenario_disagrees_at_turns_3_and_8():
     assert turn3.turn_index == 3 and turn8.turn_index == 8
     assert turn3.fact_to_remember != turn8.fact_to_remember
     # El valor del turno 8 (el más reciente) es el que debería prevalecer
-    # según la regla de merge de ProjectMetadata -- lo que confirmará
-    # MemoryDriftMetric en el Bloque 4.
+    # según la regla de merge de ProjectMetadata -- lo que confirma
+    # MemoryDriftMetric (evals/stress/metrics.py).
     assert turn8.fact_to_remember == "75000"
     assert turn3.fact_to_remember == "28000"
 
@@ -72,9 +72,9 @@ def test_scenario_rejects_fewer_than_20_turns():
 
 
 def test_scenario_turn_is_an_actual_tuple():
-    """La consigna pide 'una lista de tuplas' -- ScenarioTurn es un
-    NamedTuple, así que sigue siendo una tupla de verdad (acceso
-    posicional incluido), con nombres de campo para legibilidad."""
+    """ScenarioTurn es un NamedTuple: sigue siendo una tupla de verdad
+    (acceso posicional incluido), con nombres de campo para
+    legibilidad."""
     turn = get_scenario("growing").turns[0]
     assert isinstance(turn, tuple)
     assert turn[0] == turn.turn_index
