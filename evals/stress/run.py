@@ -1,6 +1,6 @@
-"""Runner de stress-test (sesión 6, Bloque 5 / Paso 5): corre los tres
-escenarios de `evals/stress/scenarios.py` contra sesiones reales, cruzando
-tamaño de adjunto y repeticiones, y vuelca una fila por turno a un CSV.
+"""Runner de stress-test del CAG: corre los tres escenarios de
+`evals/stress/scenarios.py` contra sesiones reales, cruzando tamaño de
+adjunto y repeticiones, y vuelca una fila por turno a un CSV.
 
 Uso::
 
@@ -14,8 +14,8 @@ Uso::
     # latencia real que in-process):
     uv run python -m evals.stress.run --http http://localhost:8000 ...
 
-El enunciado deja varias decisiones de diseño a criterio propio -- quedan
-documentadas acá porque cada una tiene un motivo concreto, no es relleno:
+Varias decisiones de diseño quedan documentadas acá porque cada una
+tiene un motivo concreto, no es relleno:
 
 1. Transporte: igual que `evals/run.py`, por defecto corre IN-PROCESS
    contra la app FastAPI con `httpx.AsyncClient` + `ASGITransport` (el
@@ -27,9 +27,9 @@ documentadas acá porque cada una tiene un motivo concreto, no es relleno:
    sin que la corrida tome horas.
 
 2. Cómo se lee `turn_observed`: NO se parsean logs (`docker compose
-   logs | grep turn_observed`, que es la opción que sugiere la
-   consigna). Desde el Bloque 4, `POST .../estimate` devuelve el campo
-   `observation` -- un `TurnObservation` completo -- directo en el body
+   logs | grep turn_observed`, una alternativa posible pero más frágil).
+   `POST .../estimate` devuelve el campo `observation` -- un
+   `TurnObservation` completo -- directo en el body
    de la respuesta. Cada turno ya trae su propia telemetría sin una
    llamada ni un parseo de log aparte. Sólo se complementa con un
    `GET /sessions/{id}` extra por turno para la metadata/resumen que
@@ -45,9 +45,9 @@ documentadas acá porque cada una tiene un motivo concreto, no es relleno:
    `EstimationService._persist_turn`) -- los turnos siguientes ya cargan
    con ese peso aunque no se reenvíe el archivo.
 
-4. La "N" de la curva de recall: la consigna no pide truncar cada
-   escenario a N ∈ {1,3,6,10,20} como hizo el Bloque 2 -- cada
-   conversación corre sus 20 turnos completos UNA sola vez, y el
+4. La "N" de la curva de recall: no hace falta truncar cada escenario a
+   N ∈ {1,3,6,10,20} en corridas separadas -- cada conversación corre
+   sus 20 turnos completos UNA sola vez, y el
    `turn_index` de cada fila ES la N. Después de cada turno se evalúa
    `MemoryDriftMetric` contra CADA hecho introducido en los turnos
    1..turn_index (vía el `GET /sessions/{id}` de ese momento); el
@@ -114,10 +114,9 @@ def _attachment_path_for(attachment_kb: int) -> Path | None:
     archivo de 0 KB, directamente no hay archivo que adjuntar).
 
     Los fixtures son gitignoreados (ver evals/stress/fixtures/build_pdfs.py
-    y .gitignore) -- la consigna pide explícitamente "comitea el script y
-    deja que el runner los regenere, son determinísticos", así que si el
-    PDF no está en disco se genera acá mismo en vez de fallar pidiéndole
-    al usuario que corra otro comando a mano."""
+    y .gitignore) -- son determinísticos, así que si el PDF no está en
+    disco se genera acá mismo en vez de fallar pidiéndole al usuario que
+    corra otro comando a mano."""
     if attachment_kb == 0:
         return None
     path = FIXTURES_DIR / f"attach_{attachment_kb}kb.pdf"

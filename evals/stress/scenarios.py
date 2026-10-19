@@ -1,16 +1,16 @@
 """Tres escenarios sintéticos multi-turno con fact-tracker, para el
-stress-test de sesión 6 (Bloque 2 / Paso 2).
+stress-test del CAG (ver evals/stress/).
 
-Cada escenario es una secuencia FIJA de `ScenarioTurn`. El runner (Bloque
-3) los recorre en orden contra una única sesión, así que el turno N ve la
-vista ya comprimida de los turnos 1..N-1 -- exactamente el mecanismo que
-queremos estresar.
+Cada escenario es una secuencia FIJA de `ScenarioTurn`. El runner
+(evals/stress/run.py) los recorre en orden contra una única sesión, así
+que el turno N ve la vista ya comprimida de los turnos 1..N-1 --
+exactamente el mecanismo que queremos estresar.
 
 El campo `fact_to_remember` de cada turno declara qué hecho debería poder
 encontrar una llamada POSTERIOR (en el historial, las anclas, el resumen,
-o el project_metadata). Eso alimenta `MemoryDriftMetric`, que se construye
-recién en el Bloque 4 -- acá solo declaramos los hechos a trackear, no los
-verificamos todavía.
+o el project_metadata). Eso alimenta `MemoryDriftMetric`
+(evals/stress/metrics.py) -- acá solo declaramos los hechos a trackear,
+no los verificamos todavía.
 
 Los tres perfiles apuntan a un modo de falla distinto del CAG:
 
@@ -32,10 +32,10 @@ Los tres perfiles apuntan a un modo de falla distinto del CAG:
                       reciente, así que el valor correcto a esperar es el
                       del turno 8, no el del 3.
 
-Por qué 20 turnos por perfil, no menos: el Bloque 2 corre cada perfil
-truncado a N ∈ {1, 3, 6, 10, 20} (ver `turns_up_to`) para graficar costo/
+Por qué 20 turnos por perfil, no menos: la idea es poder correr cada
+perfil truncado a distintos N (ver `turns_up_to`) para graficar costo/
 latencia/drift en función de la longitud de la conversación -- el perfil
-completo tiene que alcanzar para el N más grande.
+completo tiene que alcanzar para el N más grande que se quiera probar.
 """
 
 from dataclasses import dataclass, field
@@ -80,8 +80,8 @@ class Scenario:
             )
 
     def turns_up_to(self, n: int) -> list[ScenarioTurn]:
-        """Los primeros `n` turnos -- lo que usa el runner del Bloque 2
-        para correr el mismo perfil en N ∈ {1, 3, 6, 10, 20}."""
+        """Los primeros `n` turnos -- para correr el mismo perfil truncado
+        a distintos N y graficar cómo evoluciona costo/latencia/drift."""
         return [t for t in self.turns if t.turn_index <= n]
 
 

@@ -6,3 +6,21 @@ services:
     image: redis/redis-stack-server:7.4.0-v3
     ports:
       - "6379:6379"
+
+  # Hasta ahora este repo solo corría con `uv run` directo, nunca se
+  # había containerizado el FastAPI.
+  servicio_ia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      # Dentro del contenedor, "localhost" no llega al contenedor de
+      # Redis -- hay que resolverlo por el nombre del servicio en la
+      # red que crea Compose. Pisa el REDIS_URL de .env (pensado para
+      # correr fuera de Docker).
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis

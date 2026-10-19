@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 
 from app.config import settings
+from app.embedding_pipeline.router import router as embeddings_router
 from app.logging_config import configure_logging
 from app.routers import estimations, sessions
 
@@ -24,6 +25,7 @@ app = FastAPI(
 
 app.include_router(estimations.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
+app.include_router(embeddings_router, prefix="/embeddings")
 
 
 @app.get("/health", tags=["health"])

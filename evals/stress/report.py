@@ -1,5 +1,4 @@
-"""Genera evals/stress/REPORT.md a partir de evals/stress/results.csv
-(sesión 6, Bloque 5 / Paso 6).
+"""Genera evals/stress/REPORT.md a partir de evals/stress/results.csv.
 
 Uso::
 
@@ -315,7 +314,7 @@ def _reading_paragraphs(rows: list[dict[str, Any]], total_conversations: int | N
 
 def build_report(rows: list[dict[str, Any]], total_conversations: int | None = None) -> str:
     total_convos, complete_convos, complete_rate = _completion_stats(rows, total_conversations)
-    return f"""# Stress-test del CAG -- Reporte (sesión 6, Bloque 5/6)
+    return f"""# Stress-test del CAG -- Reporte
 
 {len(rows)} filas (una por turno completado), {total_convos} conversaciones intentadas,
 {complete_convos} completas ({complete_rate:.0%}).

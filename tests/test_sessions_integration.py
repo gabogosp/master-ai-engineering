@@ -409,9 +409,9 @@ async def test_acb_endpoint_iterates_then_accepts():
 
 
 async def test_turn_observed_event_carries_all_13_fields_and_turn_index_increments():
-    """Bloque 1 / Paso 1 del ejercicio de sesión 6: un único evento
-    turn_observed con los 13 campos, emitido justo antes del return de
-    /estimate -- no logs sueltos que haya que reconciliar por timestamp."""
+    """Un único evento turn_observed con los 13 campos, emitido justo
+    antes del return de /estimate -- no logs sueltos que haya que
+    reconciliar por timestamp."""
 
     def script(messages: list[dict]) -> str:
         system_content = messages[0]["content"]
@@ -479,9 +479,9 @@ async def test_turn_observed_fires_for_acb_too_and_shares_the_turn_counter():
     """EstimationService._log_turn_observed es compartido entre
     estimate_conversational y estimate_with_acb -- antes del refactor a
     EstimationService, el endpoint ACB no emitía turn_observed porque la
-    consigna original de Bloque 1 solo mencionaba el camino actor. Este
-    test fija que ahora sí, y que turn_index es un contador ÚNICO de la
-    sesión (no uno por endpoint)."""
+    lógica vivía duplicada en cada router y solo se había agregado para
+    el camino actor. Este test fija que ahora sí, y que turn_index es un
+    contador ÚNICO de la sesión (no uno por endpoint)."""
 
     def script(messages: list[dict]) -> str:
         system_content = messages[0]["content"]
