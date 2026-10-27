@@ -3,6 +3,8 @@ name = "estimador-cag"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.13",
+    "asyncpg>=0.29",
     "fastapi>=0.141.1",
     "fpdf2>=2.8.9",
     "httpx>=0.28.1",
@@ -10,6 +12,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "litellm>=1.83.0",
     "openai<3.0.0",
+    "pgvector>=0.3",
     "pydantic-settings>=2.15.0",
     "pypdf>=6.19.0",
     "python-docx>=1.2.0",
@@ -17,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "redis>=8.1.0",
     "redisvl>=0.27.2",
+    "sqlalchemy[asyncio]>=2.0",
     "streamlit>=1.64.0",
     "structlog>=26.1.0",
     "tiktoken>=0.7.0",
