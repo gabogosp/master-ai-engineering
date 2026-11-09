@@ -105,6 +105,14 @@ class IngestResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     k: int = Field(gt=0)
+    # "vector" preserva el comportamiento de Sesión 08 (solo k-NN denso).
+    # "hybrid" suma la rama léxica (tsvector) fusionada por RRF.
+    search_mode: Literal["vector", "hybrid"] = "vector"
+    # Recall-then-rerank: trae `recall_k` candidatos y los reordena con
+    # el cross-encoder antes de cortar a `k`. Apagado por default porque
+    # tiene un costo de latencia real (ver golden set de medición).
+    rerank: bool = False
+    recall_k: int = Field(default=50, gt=0)
 
 
 class SearchResult(BaseModel):
@@ -119,5 +127,11 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     k: int
+    search_mode: Literal["vector", "hybrid"]
+    rerank: bool
     search_time_ms: float = Field(ge=0)
+    # Desglose para el golden set: cuánto fue generar el embedding +
+    # correr las ramas de recall vs. cuánto fue el reranking en sí.
+    retrieval_time_ms: float = Field(ge=0)
+    rerank_time_ms: float = Field(ge=0)
     results: list[SearchResult]
