@@ -145,7 +145,7 @@ render_metrics(metrics_placeholder, st.session_state.get("last_metrics"))
 
 tab_quick, tab_conversation = st.tabs(["⚡ Estimación rápida", "💬 Conversación"])
 
-# --- Pestaña 1: formulario tipado de un solo turno (sesión 04) ---
+# --- Pestaña 1: formulario tipado de un solo turno ---
 with tab_quick:
     with st.form("estimation_form"):
         description = st.text_area(
@@ -238,7 +238,7 @@ with tab_quick:
             render_metrics(metrics_placeholder, metrics_holder)
 
 
-# --- Pestaña 2: conversación multi-turno con memoria (sesión 05) ---
+# --- Pestaña 2: conversación multi-turno con memoria ---
 with tab_conversation:
     if "session_id" not in st.session_state:
         st.session_state.session_id = create_conversation_session()

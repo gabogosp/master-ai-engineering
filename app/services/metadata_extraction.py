@@ -38,10 +38,9 @@ async def extract_and_merge_metadata(
     )
 
     try:
-        # generate_estimation ya es genérica (solo system/user -> LLMResult)
-        # desde el refactor de sesión 04: no hace falta una función nueva
-        # en llm_service.py para esto, aunque el nombre quedó pensado para
-        # estimaciones.
+        # generate_estimation ya es genérica (solo system/user -> LLMResult):
+        # no hace falta una función nueva en llm_service.py para esto, aunque
+        # el nombre quedó pensado para estimaciones.
         result = await generate_estimation(system, user)
         data = _parse_json_response(result.estimation)
         update = ProjectMetadata(

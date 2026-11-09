@@ -25,7 +25,7 @@ def _extract_docx_text(raw: bytes) -> str:
 
 
 async def extract_text(upload_file: UploadFile) -> str:
-    """Extrae texto localmente de un PDF o Word (Camino B de la consigna).
+    """Extrae texto localmente de un PDF o Word en vez de subirlo al LLM.
 
     No se sube el archivo al LLM: se extrae el texto acá y se concatena al
     transcript como texto plano. Esto mantiene el wrapper agnóstico de
@@ -64,7 +64,7 @@ def build_transcript_with_attachments(
     transcript: str, attachment_texts: list[tuple[str, str]]
 ) -> str:
     """Concatena el texto extraído de cada adjunto al transcript, con un
-    separador por archivo, tal como pide la consigna."""
+    separador por archivo."""
     parts = [transcript]
     for filename, text in attachment_texts:
         parts.append(f"--- attachment: {filename} ---\n{text}")

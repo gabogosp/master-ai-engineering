@@ -3,11 +3,11 @@ Actor-Critic-Boss), separado de las preocupaciones HTTP del router.
 
 Nace como un refactor DELIBERADAMENTE incremental: por ahora cubre solo el
 camino conversacional (POST /sessions/{id}/estimate y .../estimate-acb),
-que es el que venimos tocando en cada bloque de la consigna de sesión 6.
+que es el que viene evolucionando con el stress-test (evals/stress/).
 El formulario de un solo turno (POST /api/v1/estimate,
 app/routers/estimations.py) se queda como función suelta en
-app.services.llm_service por ahora -- se migra cuando un bloque futuro lo
-necesite, no antes, para no arriesgar código ya estable.
+app.services.llm_service por ahora -- se migra cuando una necesidad
+concreta lo justifique, no antes, para no arriesgar código ya estable.
 
 Los métodos de esta clase NO conocen FastAPI ni HTTPException: dejan
 propagar las excepciones tal como las lanzan sus colaboradores
@@ -219,23 +219,21 @@ class EstimationService:
         attachments_total_chars: int,
         structured: StructuredLLMResult,
     ) -> TurnObservation:
-        """Construye el evento agregado por turno (Bloque 1 / Paso 1 de la
-        consigna de sesión 6), en vez de los logs sueltos que ya emiten
-        llm_service/compression/metadata_extraction a lo largo del camino:
-        para extraer evals/stress/results.csv de una corrida de
-        stress-testing, un evento = una fila es mucho más simple que
-        reconciliar logs separados por timestamp y session_id.
+        """Construye un único evento agregado por turno, en vez de los
+        logs sueltos que ya emiten llm_service/compression/
+        metadata_extraction a lo largo del camino: para extraer
+        evals/stress/results.csv de una corrida de stress-testing, un
+        evento = una fila es mucho más simple que reconciliar logs
+        separados por timestamp y session_id.
 
-        Se loguea Y se devuelve (Bloque 4): el llamador la adjunta a la
-        respuesta HTTP (`EstimationResponse.observation`) para que el
-        runner de stress-test la lea directo del JSON, sin tener que
-        parsear logs con `capture_logs`.
+        Se loguea Y se devuelve: el llamador la adjunta a la respuesta
+        HTTP (`EstimationResponse.observation`) para que el runner de
+        stress-test la lea directo del JSON, sin tener que parsear logs
+        con `capture_logs`.
 
         Compartido entre estimate_conversational y estimate_with_acb --
-        antes de este refactor, ACB no emitía turn_observed porque la
-        consigna original solo mencionaba el camino actor; al vivir acá
-        los dos lo heredan gratis, sin tener que acordarnos de agregarlo
-        a mano en cada lugar nuevo.
+        así los dos lo heredan gratis, sin tener que acordarnos de
+        agregarlo a mano en cada lugar nuevo.
 
         cache_hit_kind nunca vale "semantic" -- esa cache solo está
         wireada en el endpoint de formulario de un solo turno, no en el

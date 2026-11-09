@@ -35,9 +35,9 @@ def test_attachment_path_for_known_size_points_at_fixture():
 
 
 def test_attachment_path_for_missing_fixture_generates_it_on_demand():
-    """La consigna pide "comitea el script y deja que el runner los
-    regenere" -- un tamaño sin PDF en disco no debe fallar, debe
-    generarlo ahí mismo (son determinísticos, ver build_pdfs.py)."""
+    """Un tamaño sin PDF en disco no debe fallar: debe generarlo ahí
+    mismo (son determinísticos, ver build_pdfs.py), no obligar al
+    usuario a correr otro comando a mano."""
     path = FIXTURES_DIR / "attach_1kb.pdf"
     path.unlink(missing_ok=True)
     try:

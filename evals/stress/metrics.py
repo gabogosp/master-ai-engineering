@@ -1,4 +1,4 @@
-"""Tres métricas de stress-test (sesión 6, Bloque 4 / Paso 4).
+"""Tres métricas de stress-test del CAG.
 
 Viven en un módulo separado de `evals/metrics.py`, no reexportado desde
 `evals/__init__.py`, por una razón de FORMA, no de tema: las métricas de
