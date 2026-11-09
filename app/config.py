@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "DEBUG"
     redis_url: str = "redis://localhost:6379/0"
+    database_url: str = "postgresql+asyncpg://estimator:estimator@localhost:5433/estimator"
     cache_ttl_seconds: int = 86400
     backend_url: str = "http://localhost:8000"
     max_conversation_turns: int = 6

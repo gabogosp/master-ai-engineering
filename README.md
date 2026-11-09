@@ -374,44 +374,79 @@ Instrumenta el CAG y lo somete a tres escenarios de carga (multi-turno largo, ad
 
 ## Embedding pipeline
 
-Primer paso hacia búsqueda semántica: convierte presupuestos históricos (`data/budgets_sample.json`, 15 presupuestos reales de fintech/e-commerce/healthcare/industrial) en chunks vectorizados. Todavía no se persiste en ninguna base vectorial (el siguiente paso natural es pgvector) -- los vectores se generan en memoria y se devuelven por HTTP.
+Búsqueda semántica sobre presupuestos históricos (`data/budgets_sample.json`, 15 presupuestos reales de fintech/e-commerce/healthcare/industrial): cada presupuesto se parte en chunks, se vectoriza, y se persiste en Postgres con pgvector -- un documento + sus chunks por transacción, consultables después por similitud coseno vía `POST /search`.
 
 - **`app/embedding_pipeline/chunker.py`**: `JSONStructuralChunker` -- un componente de un presupuesto = un chunk, sin overlap ni splitting. El texto de cada chunk prepende el contexto del presupuesto padre (proyecto, sector, año, tecnología principal) al detalle del componente, para que un chunk aislado no pierda a qué cliente pertenece.
 - **`app/embedding_pipeline/embedder.py`**: `OpenAIEmbedder` sobre `text-embedding-3-small` (1536 dims). Cliente **síncrono** a propósito (no el `AsyncOpenAI` que ya usa `app.services.openai_client` para moderación) -- batching de hasta 100 chunks por llamada, reintento exponencial simple ante `RateLimitError` (1s/2s/4s), y `PRICE_PER_1M_INPUT_TOKENS_USD` como constante de módulo para estimar costo.
-- **`app/embedding_pipeline/router.py`**: `POST /embeddings/ingest` (registrado en `app/main.py` bajo el prefijo `/embeddings`, sin `/api/v1`). Handler declarado `def` normal, no `async def`: `embed_many` es una llamada bloqueante, y un handler async bloquearía el event loop completo mientras espera a la API de embeddings. `OpenAIEmbedder()` se instancia dentro del handler (no como singleton de módulo) para no romper el arranque de toda la app si algún día corre sin `OPENAI_API_KEY`.
-- **`scripts/compare.py`**: CLI que embebe dos textos y calcula su similitud coseno a mano (sin numpy/scikit-learn).
+- **`app/db.py`**: engine + `async_sessionmaker` de SQLAlchemy sobre `DATABASE_URL`, y la dependency `get_session` que FastAPI inyecta por request.
+- **`app/embedding_pipeline/models.py`**: `Document`/`Chunk`, el reflejo ORM de las tablas creadas por la migración (ver "Persistencia en pgvector" más abajo).
+- **`app/embedding_pipeline/router.py`**: `POST /embeddings/ingest` y `POST /search`. Ambos handlers son `async def` (necesitan `await` contra la sesión de base), pero las llamadas al embedder (`embed_many`/`embed_one`) siguen siendo síncronas y bloqueantes -- se delegan a un hilo con `asyncio.to_thread` para no congelar el event loop mientras esperan a la API de OpenAI. `OpenAIEmbedder()` se instancia dentro de cada handler, no como singleton de módulo, para no romper el arranque de toda la app si algún día corre sin `OPENAI_API_KEY`.
 - **`app/embedding_pipeline/SANITY_CHECK.md`**: validación con las tres parejas de referencia. Hallazgo real que vale la pena leer: la pareja de textos cercanos dio 0.5957, por debajo del umbral orientativo de 0.6 -- queda documentado tal cual, sin forzar el resultado (ver la discusión completa en el archivo).
 
-### Cómo invocar el endpoint
+### Cómo invocar los endpoints
+
+Ingestar un documento (un presupuesto = un documento; `content` tiene la misma forma que una entrada de `data/budgets_sample.json`):
 
 ```bash
 curl -X POST http://localhost:8000/embeddings/ingest \
   -H "Content-Type: application/json" \
-  --data "{\"budgets\": $(cat data/budgets_sample.json)}"
+  -d '{
+    "source_path": "data/budgets_sample.json#BUD-2024-001",
+    "document_type": "historical_budget",
+    "content": <un elemento de budgets_sample.json>
+  }'
 ```
 
-También se puede probar desde `/docs` (Swagger UI) pegando el contenido de `data/budgets_sample.json` dentro del campo `budgets`.
+Un `source_path` ya ingestado devuelve `409` con el `document_id` existente, en vez de duplicar el documento.
 
-### Cómo correr `compare.py`
+Buscar por similitud sobre lo ya ingestado:
 
-Este repo no containerizaba el servicio FastAPI hasta que se agregó el embedding pipeline (`docker-compose.yml` solo levantaba Redis) -- ahora existen las dos formas:
+```bash
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "OAuth 2.0 authentication backend for fintech", "k": 5}'
+```
+
+Los dos también se pueden probar desde `/docs` (Swagger UI).
+
+### Cómo correr los scripts
+
+**`scripts/seed_corpus.py`**: ingesta el corpus completo (`data/budgets_sample.json`, un `POST /embeddings/ingest` por presupuesto). Idempotente -- correrlo de nuevo reporta los documentos ya existentes en vez de duplicarlos.
+
+**`scripts/query_examples.py`**: ejercita `POST /search` con cinco queries elegidas para mirar el corpus desde ángulos distintos (match directo, reformulación semántica, dominio ajeno, consulta ambigua, consulta muy específica) e imprime el top-5 de cada una. Reemplaza a `compare.py` de la etapa anterior del pipeline (que medía similitud entre dos textos sueltos, sin tocar la base). La salida de una corrida real contra el corpus completo queda en `output_examples.txt`.
+
+Los dos scripts hablan por HTTP con el servicio, así que primero tiene que estar corriendo y con las migraciones aplicadas (ver "Persistencia en pgvector"):
 
 **Dentro del contenedor:**
 
 ```bash
 docker compose up -d
-docker compose exec servicio_ia python scripts/compare.py \
-  --text-a "OAuth 2.0 authentication backend for fintech" \
-  --text-b "JWT-based authorization service for banking app"
+docker compose run --rm servicio_ia alembic upgrade head
+docker compose run --rm servicio_ia python scripts/seed_corpus.py
+docker compose run --rm servicio_ia python scripts/query_examples.py
 ```
 
-**Fuera del contenedor** (con `.env` cargado, `OPENAI_API_KEY` configurada):
+**Fuera del contenedor** (con `.env` cargado y `DATABASE_URL` apuntando al Postgres mapeado al host):
 
 ```bash
-uv run python scripts/compare.py \
-  --text-a "OAuth 2.0 authentication backend for fintech" \
-  --text-b "JWT-based authorization service for banking app"
+uv run alembic upgrade head
+uv run python scripts/seed_corpus.py --base-url http://localhost:8000
+uv run python scripts/query_examples.py --base-url http://localhost:8000
 ```
+
+## Persistencia en pgvector
+
+El pipeline de embeddings persiste cada presupuesto ingestado en Postgres (`pgvector/pgvector:pg16`, servicio `postgres` en `docker-compose.yml`), con un esquema relacional gestionado por Alembic (`alembic/versions/0001_initial_schema.py`).
+
+**Dos tablas (`documents` + `chunks`), no una.** Un presupuesto produce N chunks; una sola tabla repetiría la metadata del documento padre en cada fila de chunk, perdiendo integridad referencial. Con `chunks.document_id → documents.id` y `ON DELETE CASCADE`, borrar un documento borra automáticamente todos sus chunks -- lo garantiza la base, no el código de aplicación.
+
+**`metadata` como JSONB en ambas tablas, no columnas tipadas para todo.** Lo estable de cada fila (tipo de documento, tipo de chunk, fechas) vive en columnas propias, tipadas y validables de forma nativa. Lo que varía según el contenido o que el chunker puede ir enriqueciendo (sector del cliente, tecnologías mencionadas, complejidad) va en JSONB -- agregar un atributo nuevo ahí no exige una migración de esquema. El índice GIN sobre `metadata` mantiene esas consultas indexadas pese a la flexibilidad.
+
+**`cosine_distance` (operador `<=>`), no `l2_distance` ni `max_inner_product`.** Los embeddings de `text-embedding-3-small` están normalizados, así que con vectores normalizados coseno y producto interno dan el mismo ranking -- la elección es por consistencia con la convención más establecida en RAG, y porque cuando se agregue un índice HNSW, su operator class (`vector_cosine_ops`) tiene que coincidir con el operador que usa la query. Un mismatch entre operador e índice hace que Postgres ignore el índice y caiga a sequential scan sin avisar; alinear esto desde el inicio evita ese problema.
+
+**Sin índice vectorial todavía, a propósito.** Con el volumen actual (15 documentos, unas decenas de chunks), un sequential scan completo responde en cientos de milisegundos -- aceptable, y además es la referencia contra la que se mide el impacto real de cualquier índice (HNSW, IVFFlat) antes de adoptarlo. Optimizar antes de tener ese baseline sería medir a ciegas.
+
+Dos decisiones menores, de la misma migración: `embedding` es nullable (separa "persistir el chunk" de "calcular su vector" -- hoy se insertan juntos en la misma transacción, pero el esquema no cierra la puerta a una ingesta diferida más adelante), y `vector(1536)` tiene la dimensión fija al modelo de embeddings en uso -- cambiar de modelo implica reembeber todo el corpus, no es un parámetro que se ajuste en caliente.
 
 ## Estructura
 
@@ -419,11 +454,17 @@ uv run python scripts/compare.py \
 master-ai-engineering/
 ├── streamlit_app.py             # Cliente web (2 pestañas: formulario y conversación, las dos bloqueantes)
 ├── Dockerfile                    # Imagen del servicio "servicio_ia" (antes solo corría con uv run)
-├── docker-compose.yml           # Redis Stack + servicio_ia
+├── docker-compose.yml           # Redis Stack + Postgres/pgvector + servicio_ia
+├── alembic.ini
+├── alembic/
+│   ├── env.py                    # Lee DATABASE_URL del entorno, registra el tipo `vector` para autogenerate
+│   └── versions/
+│       └── 0001_initial_schema.py  # Extensión vector + tablas documents/chunks + índices no-vectoriales
 ├── data/
 │   └── budgets_sample.json      # 15 presupuestos históricos reales (fintech/e-commerce/healthcare/industrial)
 ├── scripts/
-│   └── compare.py                # CLI: similitud coseno entre dos textos (embedding_pipeline)
+│   ├── seed_corpus.py             # Ingesta data/budgets_sample.json completo, un POST /embeddings/ingest por presupuesto (idempotente)
+│   └── query_examples.py          # Ejercita POST /search con 5 queries representativas del corpus
 ├── evals/
 │   ├── dataset.py                # GoldenCase + load_dataset()
 │   ├── golden_dataset.json       # 16 casos dorados
@@ -456,8 +497,7 @@ master-ai-engineering/
 │   ├── test_embedding_schemas.py  # Validación Pydantic del embedding_pipeline
 │   ├── test_embedding_chunker.py  # JSONStructuralChunker: 1 chunk por componente, contexto del padre
 │   ├── test_embedding_embedder.py # OpenAIEmbedder con cliente mockeado: batching, orden, reintentos
-│   ├── test_embedding_router.py   # POST /embeddings/ingest: 200/422/500 (embedder mockeado)
-│   ├── test_compare.py            # cosine_similarity con vectores conocidos
+│   ├── test_embedding_router.py   # POST /embeddings/ingest + POST /search: 200/409/422/500 (embedder y sesión de base mockeados)
 │   ├── test_stream_and_ui.py    # Streamlit vía AppTest (mock de httpx)
 │   └── prompts/
 │       ├── test_estimation_v1.py
@@ -496,11 +536,13 @@ master-ai-engineering/
 │   │   ├── semantic_cache.py      # Cache semántica: redisvl + Redis Stack
 │   │   ├── metadata_extraction.py # Segunda llamada al LLM que extrae project_metadata
 │   │   └── cache.py                # Cache exact-match sobre Redis
-│   └── embedding_pipeline/        # Sesión 7: chunking + embeddings de presupuestos históricos
-│       ├── schemas.py             # Budget, BudgetComponent, Chunk, EmbeddedChunk, IngestRequest/Response
+│   ├── db.py                      # Engine + async_sessionmaker de SQLAlchemy sobre DATABASE_URL, dependency get_session
+│   └── embedding_pipeline/        # Chunking, embeddings y búsqueda semántica sobre presupuestos históricos
+│       ├── schemas.py             # Budget, BudgetComponent, Chunk, EmbeddedChunk, IngestRequest/Response, SearchRequest/Response
 │       ├── chunker.py             # JSONStructuralChunker: 1 componente = 1 chunk
 │       ├── embedder.py            # OpenAIEmbedder (cliente SÍNCRONO propio, batching, reintentos)
-│       ├── router.py              # POST /embeddings/ingest
+│       ├── models.py              # Document/Chunk: ORM de las tablas persistidas en pgvector
+│       ├── router.py              # POST /embeddings/ingest, POST /search
 │       └── SANITY_CHECK.md        # Validación con las 3 parejas de referencia (coseno, sin numpy)
 ```
 

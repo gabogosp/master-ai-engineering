@@ -7,6 +7,29 @@ services:
     ports:
       - "6379:6379"
 
+  # Postgres 16 con la extensión vector precompilada -- se habilita con
+  # un solo `CREATE EXTENSION` en la primera migración, sin tener que
+  # compilar pgvector a mano sobre la imagen oficial de postgres.
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: estimator
+      POSTGRES_USER: estimator
+      POSTGRES_PASSWORD: estimator
+    ports:
+      # Puerto de host 5433 (no 5432): ya hay otro Postgres ocupando
+      # 5432 en esta máquina de desarrollo. El 5432 interno (el que
+      # usan DATABASE_URL y los demás servicios de este compose vía la
+      # red interna) no cambia.
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U estimator -d estimator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # Hasta ahora este repo solo corría con `uv run` directo, nunca se
   # había containerizado el FastAPI.
   servicio_ia:
@@ -20,7 +43,18 @@ services:
       # red que crea Compose. Pisa el REDIS_URL de .env (pensado para
       # correr fuera de Docker).
       REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://estimator:estimator@postgres:5432/estimator
+      # Los scripts (seed_corpus.py, query_examples.py) le pegan a esta
+      # URL cuando corren dentro de la red de Compose -- "localhost"
+      # ahí sería el contenedor del propio script, no el del servidor.
+      BACKEND_URL: http://servicio_ia:8000
     ports:
       - "8000:8000"
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

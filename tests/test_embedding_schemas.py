@@ -6,6 +6,7 @@ from app.embedding_pipeline.schemas import (
     ChunkMetadata,
     EmbeddedChunk,
     IngestRequest,
+    SearchRequest,
 )
 
 
@@ -53,9 +54,31 @@ def test_complexity_rejects_value_outside_low_medium_high():
         Budget.model_validate(_budget(components=[_component(complexity="extreme")]))
 
 
-def test_ingest_request_rejects_an_empty_budget_list():
+def test_ingest_request_parses_a_single_document():
+    request = IngestRequest.model_validate(
+        {
+            "source_path": "data/budgets/budget_2024_q1_fintech.json",
+            "document_type": "historical_budget",
+            "content": _budget(),
+        }
+    )
+    assert request.content.budget_id == "BUD-TEST-001"
+
+
+def test_ingest_request_rejects_a_malformed_budget():
     with pytest.raises(ValidationError):
-        IngestRequest.model_validate({"budgets": []})
+        IngestRequest.model_validate(
+            {
+                "source_path": "data/budgets/x.json",
+                "document_type": "historical_budget",
+                "content": {"budget_id": "sin-el-resto"},
+            }
+        )
+
+
+def test_search_request_rejects_a_non_positive_k():
+    with pytest.raises(ValidationError):
+        SearchRequest.model_validate({"query": "OAuth backend", "k": 0})
 
 
 def test_embedded_chunk_rejects_an_embedding_with_the_wrong_dimension():

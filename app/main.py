@@ -25,7 +25,7 @@ app = FastAPI(
 
 app.include_router(estimations.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
-app.include_router(embeddings_router, prefix="/embeddings")
+app.include_router(embeddings_router)
 
 
 @app.get("/health", tags=["health"])

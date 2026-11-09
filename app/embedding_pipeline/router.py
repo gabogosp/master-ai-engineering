@@ -1,23 +1,36 @@
-"""Endpoint POST /embeddings/ingest.
-
-Handler declarado `def` normal, NO `async def` -- `embed_many` hace
-una llamada SÍNCRONA y bloqueante a la API de OpenAI. Si este
-handler fuera async, esa llamada bloquearía el único event loop del
-proceso mientras espera, congelando también las peticiones a
-/sessions/*. FastAPI corre los handlers `def` normales en un
-threadpool automáticamente, así que basta con no poner `async` acá.
+"""Endpoints del pipeline de embeddings: ingesta persistida y búsqueda
+semántica sobre lo ya ingestado.
 """
 
-import structlog
-from fastapi import APIRouter, HTTPException
-from openai import OpenAIError
+import asyncio
+import time
 
+import structlog
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
+from openai import OpenAIError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_session
 from app.embedding_pipeline.chunker import JSONStructuralChunker
-from app.embedding_pipeline.embedder import PRICE_PER_1M_INPUT_TOKENS_USD, OpenAIEmbedder
-from app.embedding_pipeline.schemas import IngestRequest, IngestResponse, IngestStats
+from app.embedding_pipeline.embedder import OpenAIEmbedder
+from app.embedding_pipeline.models import Chunk as ChunkRow
+from app.embedding_pipeline.models import Document
+from app.embedding_pipeline.schemas import (
+    IngestRequest,
+    IngestResponse,
+    SearchRequest,
+    SearchResponse,
+    SearchResult,
+)
 
 logger = structlog.get_logger(__name__)
 
+#  Sin prefix a nivel de router: /ingest queda bajo /embeddings (se
+# agrega al path de esa ruta puntual) pero /search es top-level, no
+# anidado -- un prefix compartido para todo el módulo forzaría los
+# dos bajo el mismo namespace.
 router = APIRouter(tags=["embeddings"])
 
 # Singleton seguro de instanciar al importar: tiktoken.encoding_for_model
@@ -25,9 +38,23 @@ router = APIRouter(tags=["embeddings"])
 _chunker = JSONStructuralChunker()
 
 
-@router.post("/ingest", response_model=IngestResponse)
-def ingest(request: IngestRequest) -> IngestResponse:
-    chunks = _chunker.chunk(request.budgets)
+@router.post("/embeddings/ingest", response_model=IngestResponse)
+async def ingest(
+    request: IngestRequest, session: AsyncSession = Depends(get_session)
+) -> IngestResponse | JSONResponse:
+    t0 = time.perf_counter()
+
+    existing = await session.scalar(
+        select(Document).where(Document.source_path == request.source_path)
+    )
+    if existing is not None:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "Document already ingested", "document_id": existing.id},
+        )
+
+    budget = request.content
+    chunks = _chunker.chunk([budget])
 
     try:
         # OpenAIEmbedder() se instancia ACÁ, no a nivel de módulo: su
@@ -36,7 +63,11 @@ def ingest(request: IngestRequest) -> IngestResponse:
         # singleton a nivel de módulo haría que todo app.main fallara al
         # importar solo por este endpoint, aunque nadie lo use.
         embedder = OpenAIEmbedder()
-        embedded = embedder.embed_many(chunks)
+        # embed_many es una llamada SÍNCRONA y bloqueante -- correrla
+        # directo congelaría el único event loop del proceso (y con él,
+        # cualquier otra petición en curso) mientras esperamos a la API
+        # de OpenAI. to_thread la delega a un hilo aparte.
+        embedded = await asyncio.to_thread(embedder.embed_many, chunks)
     except RuntimeError as exc:
         logger.error("embedding_service_misconfigured", error=str(exc))
         raise HTTPException(
@@ -48,11 +79,96 @@ def ingest(request: IngestRequest) -> IngestResponse:
             status_code=500, detail="No se pudo generar los embeddings. Inténtalo de nuevo."
         ) from exc
 
-    total_tokens = sum(chunk.token_count for chunk in chunks)
-    stats = IngestStats(
-        total_budgets=len(request.budgets),
-        total_chunks=len(embedded),
-        total_tokens=total_tokens,
-        estimated_cost_usd=total_tokens * PRICE_PER_1M_INPUT_TOKENS_USD / 1_000_000,
+    # Nada se escribió en la sesión todavía -- si el embedder falla, no
+    # hay ningún documento a medio guardar que limpiar. El documento y
+    # sus fragmentos se agregan y confirman juntos, en el mismo commit.
+    document = Document(
+        source_path=request.source_path,
+        document_type=request.document_type,
+        extra={
+            "budget_id": budget.budget_id,
+            "sector": budget.client_metadata.sector,
+            "main_technology": budget.main_technology,
+            "year": budget.year,
+        },
     )
-    return IngestResponse(chunks=embedded, stats=stats)
+    chunk_rows = [
+        ChunkRow(
+            document=document,
+            chunk_type="budget_component",
+            content=chunk.text,
+            embedding=chunk.embedding,
+            extra=chunk.metadata.model_dump(),
+        )
+        for chunk in embedded
+    ]
+
+    session.add(document)
+    session.add_all(chunk_rows)
+    await session.commit()
+
+    ingestion_time_ms = (time.perf_counter() - t0) * 1000
+    return IngestResponse(
+        document_id=document.id,
+        chunks_created=len(chunk_rows),
+        embedding_dimension=len(embedded[0].embedding),
+        ingestion_time_ms=round(ingestion_time_ms, 1),
+    )
+
+
+@router.post("/search", response_model=SearchResponse)
+async def search(
+    request: SearchRequest, session: AsyncSession = Depends(get_session)
+) -> SearchResponse:
+    t0 = time.perf_counter()
+
+    try:
+        embedder = OpenAIEmbedder()
+        query_vector = await asyncio.to_thread(embedder.embed_one, request.query)
+    except RuntimeError as exc:
+        logger.error("embedding_service_misconfigured", error=str(exc))
+        raise HTTPException(
+            status_code=500, detail="El servicio de embeddings está mal configurado."
+        ) from exc
+    except OpenAIError as exc:
+        logger.error("embedding_search_failed", error_type=type(exc).__name__, exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="No se pudo generar el embedding de la consulta."
+        ) from exc
+
+    # vector_cosine_ops es la operator class que el índice HNSW (cuando
+    # se agregue) va a declarar -- usar cosine_distance acá desde el
+    # principio evita el mismatch de operador/índice que hace que
+    # Postgres ignore un índice sin avisar y caiga a sequential scan.
+    distance = ChunkRow.embedding.cosine_distance(query_vector).label("distance")
+    stmt = (
+        select(
+            ChunkRow.id,
+            ChunkRow.document_id,
+            ChunkRow.chunk_type,
+            ChunkRow.content,
+            ChunkRow.extra,
+            distance,
+        )
+        .order_by(distance)
+        .limit(request.k)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    search_time_ms = (time.perf_counter() - t0) * 1000
+    return SearchResponse(
+        query=request.query,
+        k=request.k,
+        search_time_ms=round(search_time_ms, 1),
+        results=[
+            SearchResult(
+                chunk_id=row.id,
+                document_id=row.document_id,
+                chunk_type=row.chunk_type,
+                content=row.content,
+                distance=row.distance,
+                metadata=row.extra,
+            )
+            for row in rows
+        ],
+    )
