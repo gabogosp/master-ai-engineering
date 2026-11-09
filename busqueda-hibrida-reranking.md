@@ -57,8 +57,8 @@ trigger aparte: Postgres la recalcula sola en cada insert/update de
   latencias razonables). Carga perezosa con lock, para no pagar el costo de
   `import torch` ni la descarga del modelo al importar el módulo o correr
   tests.
-- `scripts/verify_reranker.py` -- chequeo de pre-vuelo pedido como gate antes
-  de integrar nada; confirmado localmente: el modelo carga y prioriza
+- `scripts/verify_reranker.py` -- chequeo de pre-vuelo como gate antes de
+  integrar nada; confirmado localmente: el modelo carga y prioriza
   correctamente un documento relevante sobre uno irrelevante.
 - Patrón recall-then-rerank en `retrieval.py`: cuando `rerank=True`, la
   recuperación trae un pool amplio (`recall_k=50` por default) y el
@@ -80,9 +80,9 @@ Cinco consultas en inglés (mismo idioma que el corpus -- una consulta en
 español contra un corpus en inglés no tendría overlap léxico, y la rama
 híbrida no tendría nada que demostrar), anotadas a mano contra los 15
 presupuestos reales de `data/budgets_sample.json`. Las dos primeras son
-deliberadamente ambiguas en vocabulario de "pagos" -- el caso que motiva
-el ejercicio: un presupuesto puede estar cerca en el espacio vectorial y
-no ser el proyecto correcto.
+deliberadamente ambiguas en vocabulario de "pagos" -- el caso real que
+justifica la búsqueda híbrida y el reranking: un presupuesto puede estar
+cerca en el espacio vectorial y no ser el proyecto correcto.
 
 | # | Query | Relevante |
 |---|---|---|
@@ -94,7 +94,7 @@ no ser el proyecto correcto.
 
 Medido con `scripts/golden_set_eval.py` (`PYTHONPATH=. uv run python
 scripts/golden_set_eval.py`), contra el servicio real, sin mocks. Además de
-precisión@5 (la métrica pedida) se agrega MRR@5 (1/posición del primer
+precisión@5 (la métrica de referencia) se agrega MRR@5 (1/posición del primer
 resultado relevante): precisión@5 cuenta *cuántos* resultados del top-5 son
 relevantes pero es ciega al *orden* -- si reordenar sube el único resultado
 relevante de la posición 2 a la 1, precisión@5 no cambia pero el reranking sí

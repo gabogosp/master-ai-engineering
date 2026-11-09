@@ -26,9 +26,10 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 # corpus (ver data/budgets_sample.json).
 #
 # Las dos primeras son deliberadamente ambiguas en el vocabulario de
-# "pagos" (el caso que motiva el ejercicio: un presupuesto puede estar
-# cerca en el espacio vectorial y no ser el proyecto correcto). Las
-# otras tres son casos limpios de un solo sector, para contrastar.
+# "pagos" (el caso real que justifica la búsqueda híbrida y el reranking:
+# un presupuesto puede estar cerca en el espacio vectorial y no ser el
+# proyecto correcto). Las otras tres son casos limpios de un solo sector,
+# para contrastar.
 GOLDEN_SET = [
     {
         # Describe una tienda online con checkout -- el proyecto
@@ -94,8 +95,8 @@ def _reciprocal_rank(results: list[dict], relevant_budget_ids: set[str]) -> floa
     hay ninguno en el top-k. Precision@5 cuenta CUÁNTOS resultados son
     relevantes pero es ciega al ORDEN -- si reordenar sube el único
     resultado relevante de la posición 2 a la 1, precision@5 no se
-    mueve pero el reciprocal rank sí (0.5 -> 1.0). Complementa la
-    métrica pedida en vez de reemplazarla."""
+    mueve pero el reciprocal rank sí (0.5 -> 1.0). Complementa a
+    precision@5 en vez de reemplazarla."""
     for position, result in enumerate(results, start=1):
         if result["metadata"].get("budget_id") in relevant_budget_ids:
             return 1.0 / position

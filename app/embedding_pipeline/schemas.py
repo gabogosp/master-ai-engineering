@@ -105,7 +105,7 @@ class IngestResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     k: int = Field(gt=0)
-    # "vector" preserva el comportamiento de Sesión 08 (solo k-NN denso).
+    # "vector" preserva el comportamiento previo (solo k-NN denso).
     # "hybrid" suma la rama léxica (tsvector) fusionada por RRF.
     search_mode: Literal["vector", "hybrid"] = "vector"
     # Recall-then-rerank: trae `recall_k` candidatos y los reordena con
