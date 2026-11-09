@@ -75,7 +75,7 @@ class Scenario:
         if len(self.turns) < 20:
             raise ValueError(
                 f"el escenario {self.name!r} tiene {len(self.turns)} turnos; "
-                "el ejercicio pide al menos 20 para poder correr hasta N=20 "
+                "se necesitan al menos 20 para poder correr hasta N=20 "
                 "y para que la ventana deslizante realmente se estrese"
             )
 
