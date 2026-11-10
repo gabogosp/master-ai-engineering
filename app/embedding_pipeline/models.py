@@ -11,7 +11,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -53,6 +53,12 @@ class Chunk(Base):
     extra: Mapped[dict] = mapped_column(
         "metadata", JSONB, server_default="{}", nullable=False
     )
+    # Columna GENERATED ALWAYS (migración 0002) -- Postgres la calcula
+    # sola a partir de `content`, nunca se escribe desde la aplicación.
+    # Sin un `server_default` acá: declararlo con uno haría que SQLAlchemy
+    # intente mandarlo en el INSERT, y Postgres rechaza cualquier valor
+    # explícito (hasta NULL) para una columna generada.
+    search_vector: Mapped[str | None] = mapped_column(TSVECTOR, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

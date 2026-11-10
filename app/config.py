@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     # disponible, y el loop no converge.
     boss_max_iterations: int = 3
 
+    # --- Búsqueda híbrida y reranking sobre el corpus de presupuestos ---
+    # Multilingüe y liviano (corre en CPU a latencias razonables para uso
+    # didáctico): el corpus (data/budgets_sample.json) está en inglés, pero
+    # las transcripciones de cliente que alimentan la búsqueda pueden no
+    # estarlo.
+    reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+    # Constante de suavizado de Reciprocal Rank Fusion -- 60 es el valor
+    # del paper original (Cormack et al.) y el default razonable: un valor
+    # alto aplana la curva (un documento necesita rankear bien en AMBAS
+    # ramas para ganar), uno bajo deja que un solo primer puesto domine.
+    rrf_k: int = 60
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
