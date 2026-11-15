@@ -432,7 +432,7 @@ with tab_conversation:
 with tab_grounded:
     st.caption(
         "Cada línea de la estimación cita el fragmento de presupuesto histórico del que "
-        "se derivó, y el sistema verifica que esa fuente exista de verdad entre los "
+        "se derivó, y el sistema verifica que esa fuente exista realmente entre los "
         "fragmentos recuperados. Los presupuestos históricos están en inglés: las "
         "consultas en inglés dan mejores resultados."
     )

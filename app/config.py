@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     max_conversation_turns: int = 6
     # Tope duro por adjunto extraído (en caracteres), para proteger la
     # ventana de contexto -- sin esto, un PDF enorme se manda entero al
-    # LLM. El chunking de verdad entra en el módulo 3; esto es un corte
-    # simple por ahora.
+    # LLM. Es un corte simple a propósito; partir el adjunto en fragmentos
+    # relevantes queda como mejora futura.
     max_attachment_chars: int = 60_000
 
     # --- Cache semántica (requiere redis/redis-stack, no redis:7-alpine) ---

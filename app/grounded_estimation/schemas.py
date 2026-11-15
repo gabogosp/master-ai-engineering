@@ -65,8 +65,8 @@ class Estimate(BaseModel):
 
     @property
     def grounded_hours(self) -> float:
-        """Total is computed here, never asked from the model: LLMs are bad at
-        summing, and ungrounded lines contribute 0 by construction."""
+        """Total is computed here, never asked from the model: LLMs are unreliable at
+        arithmetic, and ungrounded lines contribute 0 by construction."""
         return sum(line.hours for line in self.lines if line.grounded)
 
     @property

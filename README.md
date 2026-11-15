@@ -284,7 +284,7 @@ La respuesta es el mismo `EstimationResponse` del endpoint de formulario, con do
 
 Se eligió **extracción local** (`pypdf` para PDF, `python-docx` para Word) en vez de subir el archivo directo a la Files API de un proveedor (Camino A). Razón: el wrapper de LLM (`llm_service.py`) es agnóstico de proveedor — el Router de LiteLLM hace fallback automático entre OpenAI y Anthropic. Atar un adjunto a la Files API de un proveedor específico rompería esa propiedad justo para las peticiones con adjuntos. Extraer el texto localmente (`app/attachments.py`) mantiene el fallback intacto en todos los casos. El texto de cada adjunto se concatena al transcript con un separador `--- attachment: <filename> ---`, y el guardrail de input corre sobre el transcript YA CON los adjuntos concatenados — un PDF también puede traer PII o un intento de prompt-injection.
 
-**Tope duro por adjunto** (`MAX_ATTACHMENT_CHARS`, 60.000 caracteres por defecto): protege la ventana de contexto de un PDF enorme. Si el texto extraído lo supera, se corta (`text[:max_chars]`) y queda un log `attachment_truncated` con el tamaño original y el que quedó. Es un corte simple a propósito — el chunking de verdad (partir el adjunto en pedazos relevantes en vez de cortar a lo bruto) entra con RAG en el módulo 3.
+**Tope duro por adjunto** (`MAX_ATTACHMENT_CHARS`, 60.000 caracteres por defecto): protege la ventana de contexto de un PDF enorme. Si el texto extraído lo supera, se corta (`text[:max_chars]`) y queda un log `attachment_truncated` con el tamaño original y el que quedó. Es un corte simple a propósito; partir el adjunto en fragmentos relevantes en lugar de truncarlo queda como mejora futura.
 
 ### Decisión: extracción de `project_metadata` — LLM extractor
 
@@ -455,7 +455,7 @@ Dos decisiones menores, de la misma migración: `embedding` es nullable (separa 
 
 ## Estimación con fuentes verificables
 
-`POST /estimate/grounded` estima un proyecto nuevo a partir de presupuestos históricos y hace que **cada línea** (cada componente) cite el fragmento concreto del que se derivó. Un verificador comprueba por código que cada fragmento citado exista de verdad entre los que se le entregaron al modelo.
+`POST /estimate/grounded` estima un proyecto nuevo a partir de presupuestos históricos y hace que **cada línea** (cada componente) cite el fragmento concreto del que se derivó. Un verificador comprueba por código que cada fragmento citado exista realmente entre los que se le entregaron al modelo.
 
 ```bash
 curl -X POST localhost:8000/estimate/grounded -H "Content-Type: application/json" \

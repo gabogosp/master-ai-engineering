@@ -87,7 +87,7 @@ cerca en el espacio vectorial y no ser el proyecto correcto.
 | # | Query | Relevante |
 |---|---|---|
 | 1 | *Online payment processing for checkout and order management* | `BUD-2024-005` (storefront e-commerce, no el gateway de pagos) |
-| 2 | *Real-time payment gateway with fraud detection and settlement reconciliation with the acquirer* | `BUD-2024-003` (sí es, de verdad, un proyecto de pagos) |
+| 2 | *Real-time payment gateway with fraud detection and settlement reconciliation with the acquirer* | `BUD-2024-003` (es efectivamente un proyecto de pagos) |
 | 3 | *Remote patient monitoring platform ingesting wearable device data with alerts* | `BUD-2024-010` |
 | 4 | *Factory IoT telemetry platform for predictive maintenance* | `BUD-2024-013` |
 | 5 | *Multi-vendor marketplace with vendor payouts and buyer-seller dispute handling* | `BUD-2024-006` |
