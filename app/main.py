@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.embedding_pipeline.router import router as embeddings_router
+from app.grounded_estimation.router import router as grounded_estimation_router
 from app.logging_config import configure_logging
 from app.routers import estimations, sessions
 
@@ -26,6 +27,7 @@ app = FastAPI(
 app.include_router(estimations.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(embeddings_router)
+app.include_router(grounded_estimation_router)
 
 
 @app.get("/health", tags=["health"])

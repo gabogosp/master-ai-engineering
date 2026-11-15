@@ -1,0 +1,11 @@
+Project to estimate:
+{{ query }}
+
+Retrieved context:
+{% for chunk in chunks %}
+<chunk chunk_id="{{ chunk.chunk_id }}" document_id="{{ chunk.document_id }}">
+{{ chunk.content }}
+</chunk>
+{% endfor %}
+
+Produce the line-level estimate now.

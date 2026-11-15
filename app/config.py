@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     # ramas para ganar), uno bajo deja que un solo primer puesto domine.
     rrf_k: int = 60
 
+    # --- Line-level grounded estimation ---
+    # Responses API is OpenAI-only, so this does not follow `llm_provider`.
+    grounded_generation_model: str = "gpt-4o-mini"
+    # Judge for the RAGAS evaluation; a different (stronger) model than the
+    # generator so the pipeline is not grading its own work.
+    ragas_judge_model: str = "gpt-4o"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
