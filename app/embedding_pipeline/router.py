@@ -17,6 +17,7 @@ from app.embedding_pipeline.chunker import JSONStructuralChunker
 from app.embedding_pipeline.embedder import OpenAIEmbedder
 from app.embedding_pipeline.models import Chunk as ChunkRow
 from app.embedding_pipeline.models import Document
+from app.embedding_pipeline.retrieval import retrieve
 from app.embedding_pipeline.schemas import (
     IngestRequest,
     IngestResponse,
@@ -136,39 +137,34 @@ async def search(
             status_code=500, detail="No se pudo generar el embedding de la consulta."
         ) from exc
 
-    # vector_cosine_ops es la operator class que el índice HNSW (cuando
-    # se agregue) va a declarar -- usar cosine_distance acá desde el
-    # principio evita el mismatch de operador/índice que hace que
-    # Postgres ignore un índice sin avisar y caiga a sequential scan.
-    distance = ChunkRow.embedding.cosine_distance(query_vector).label("distance")
-    stmt = (
-        select(
-            ChunkRow.id,
-            ChunkRow.document_id,
-            ChunkRow.chunk_type,
-            ChunkRow.content,
-            ChunkRow.extra,
-            distance,
-        )
-        .order_by(distance)
-        .limit(request.k)
+    chunks, metrics = await retrieve(
+        session,
+        query_text=request.query,
+        query_vector=query_vector,
+        search_mode=request.search_mode,
+        rerank=request.rerank,
+        k=request.k,
+        recall_k=request.recall_k,
     )
-    rows = (await session.execute(stmt)).all()
 
     search_time_ms = (time.perf_counter() - t0) * 1000
     return SearchResponse(
         query=request.query,
         k=request.k,
+        search_mode=request.search_mode,
+        rerank=request.rerank,
         search_time_ms=round(search_time_ms, 1),
+        retrieval_time_ms=metrics["retrieval_time_ms"],
+        rerank_time_ms=metrics["rerank_time_ms"],
         results=[
             SearchResult(
-                chunk_id=row.id,
-                document_id=row.document_id,
-                chunk_type=row.chunk_type,
-                content=row.content,
-                distance=row.distance,
-                metadata=row.extra,
+                chunk_id=chunk.id,
+                document_id=chunk.document_id,
+                chunk_type=chunk.chunk_type,
+                content=chunk.content,
+                distance=chunk.distance,
+                metadata=chunk.metadata,
             )
-            for row in rows
+            for chunk in chunks
         ],
     )
