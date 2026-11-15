@@ -21,7 +21,7 @@ colaborador (generate_structured_conversation_turn, Critic, Boss,
 check_input...) ya resuelve sus propios singletons a nivel de módulo. Eso
 significa que, para testear esta clase con fakes en vez de mockear esos
 singletons, haría falta un segundo incremento de refactor -- no se hizo
-acá a propósito, para no agrandar el cambio más de lo que pide esta tarea.
+acá a propósito, para mantener acotado el alcance de este refactor.
 """
 
 from datetime import datetime, timezone
