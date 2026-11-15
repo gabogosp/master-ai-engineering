@@ -18,11 +18,12 @@ Módulo nuevo `app/grounded_estimation/`, sin tocar el endpoint de estimaciones 
 
 El total de horas nunca se le pide al modelo: se calcula en código sumando solo las líneas fundamentadas.
 
-Tests (77 casos nuevos; la suite completa da 261 passed, también dentro de Docker):
+Tests (90 casos nuevos; la suite completa da 274 passed, también dentro de Docker):
 
 - `tests/test_grounded_estimation.py`: reglas de integridad del schema (incluido que el schema se mantenga dentro del subconjunto que acepta el modo estricto), clasificación del verificador con sus bordes (cita colgante plantada, fuente válida más inventada, ids casi iguales, contexto vacío), correlación por `request_id` en los logs, reintentos del generador y del servicio (un único reintento como máximo), parámetros que el servicio le pasa a la búsqueda y al modelo, y que no se llame al LLM si no se recuperó nada.
 - `tests/test_grounded_router.py`: el endpoint por HTTP. Forma de la respuesta, entrada inválida (422), fallos del modelo y de OpenAI (502) y mala configuración (500) sin filtrar detalles internos, y un recorrido completo por el servicio real con solo el exterior simulado.
 - `tests/prompts/test_grounded_estimation_prompt.py`: render del prompt de sistema y de usuario.
+- `tests/test_stream_and_ui.py`: la pestaña "Estimación con fuentes" de la interfaz (resultado, cita inválida visible, parámetros enviados, errores del backend y de conexión).
 
 ## 2. Informe de verificación de citaciones
 
