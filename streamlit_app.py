@@ -126,6 +126,115 @@ def render_project_metadata(placeholder, metadata: dict | None, history_turns: i
 
 MAX_CONVERSATION_TURNS_HINT = 6  # debe coincidir con settings.max_conversation_turns
 
+CITATION_STATUS_LABELS = {
+    "grounded": "✅ Fundamentada",
+    "dangling_citation": "⚠️ Cita inválida",
+    "insufficient_data": "➖ Sin datos suficientes",
+}
+SEARCH_MODE_LABELS = {"hybrid": "Híbrida (recomendada)", "vector": "Solo vectorial"}
+MIN_GROUNDED_QUERY_CHARS = 20
+
+
+def call_grounded_estimate(payload: dict) -> dict:
+    """POST bloqueante a /estimate/grounded. Es una ruta de primer nivel: no
+    cuelga de /api/v1 como las estimaciones originales."""
+    url = f"{settings.backend_url}/estimate/grounded"
+    try:
+        with httpx.Client(timeout=httpx.Timeout(120.0)) as client:
+            response = client.post(url, json=payload)
+    except httpx.RequestError as exc:
+        raise RuntimeError(f"No se pudo conectar con el servicio: {exc}") from exc
+
+    if response.status_code != 200:
+        detail = response.text
+        if "application/json" in response.headers.get("content-type", ""):
+            detail = response.json().get("detail", detail)
+        raise RuntimeError(f"Error {response.status_code}: {detail}")
+
+    return response.json()
+
+
+def render_grounded_result(body: dict) -> None:
+    """Muestra la estimación con fuentes: totales, estado de cada línea y,
+    por componente, la evidencia citada junto al texto real del fragmento
+    histórico, para que quien la lea pueda comprobar la cita por sí mismo."""
+    estimate = body["estimate"]
+    verdicts = body["citation_report"]["verdicts"]
+    chunks_by_id = {chunk["chunk_id"]: chunk for chunk in body["retrieved_chunks"]}
+    counts = {
+        status: sum(1 for verdict in verdicts if verdict["status"] == status)
+        for status in CITATION_STATUS_LABELS
+    }
+
+    st.markdown(estimate["summary"])
+
+    cols = st.columns(4)
+    cols[0].metric("Horas verificadas", f"{body['verified_hours']:g}")
+    for col, status in zip(cols[1:], CITATION_STATUS_LABELS, strict=True):
+        col.metric(CITATION_STATUS_LABELS[status], counts[status])
+
+    if not body["retrieved_chunks"]:
+        st.warning("No se recuperó ningún fragmento histórico: no hay base para estimar.")
+    if counts["dangling_citation"]:
+        st.error(
+            f"{counts['dangling_citation']} línea(s) citan fuentes que no existen en el "
+            "contexto recuperado. Sus horas no cuentan como verificadas."
+        )
+    if body["claimed_hours"] != body["verified_hours"]:
+        st.warning(
+            f"El modelo declaró {body['claimed_hours']:g} h, pero solo "
+            f"{body['verified_hours']:g} h tienen citas verificadas."
+        )
+    if body["corrected_after_dangling"]:
+        st.info("El modelo citó una fuente inexistente y se le pidió corregirla con un reintento.")
+
+    st.dataframe(
+        [
+            {
+                "Componente": line["component"],
+                "Horas": line["hours"],
+                "Estado": CITATION_STATUS_LABELS[verdict["status"]],
+                "Fuentes": ", ".join(
+                    f"chunk {source['chunk_id']} ({source['document_id']})"
+                    for source in line["sources"]
+                )
+                or "—",
+            }
+            for line, verdict in zip(estimate["lines"], verdicts, strict=True)
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+
+    if estimate["lines"]:
+        st.markdown("**Detalle por componente** (abrí cada uno para ver su evidencia)")
+    for line, verdict in zip(estimate["lines"], verdicts, strict=True):
+        label = (
+            f"{CITATION_STATUS_LABELS[verdict['status']]} · "
+            f"{line['component']} · {line['hours']:g} h"
+        )
+        with st.expander(label):
+            st.markdown(line["rationale"])
+            for source in line["sources"]:
+                st.markdown(
+                    f"**Fuente:** fragmento `{source['chunk_id']}` del presupuesto "
+                    f"`{source['document_id']}`"
+                )
+                st.markdown(f"**Evidencia citada:** “{source['evidence']}”")
+                chunk = chunks_by_id.get(source["chunk_id"])
+                if chunk is None:
+                    st.error("Ese fragmento no existe en el contexto recuperado: la cita es inválida.")
+                else:
+                    st.caption("Texto real del fragmento citado:")
+                    st.code(chunk["content"], language=None, wrap_lines=True)
+
+    with st.expander(f"📚 Contexto recuperado ({len(body['retrieved_chunks'])} fragmentos)"):
+        for chunk in body["retrieved_chunks"]:
+            st.markdown(f"**Fragmento `{chunk['chunk_id']}`** · presupuesto `{chunk['document_id']}`")
+            st.code(chunk["content"], language=None, wrap_lines=True)
+
+    st.caption(f"Identificador de la petición (para buscarla en los logs): `{body['request_id']}`")
+
 
 # --- Barra lateral: observabilidad de la última llamada (estimación rápida) ---
 with st.sidebar:
@@ -143,7 +252,9 @@ render_prompt_preview(
 render_metrics(metrics_placeholder, st.session_state.get("last_metrics"))
 
 
-tab_quick, tab_conversation = st.tabs(["⚡ Estimación rápida", "💬 Conversación"])
+tab_quick, tab_conversation, tab_grounded = st.tabs(
+    ["⚡ Estimación rápida", "💬 Conversación", "🔎 Estimación con fuentes"]
+)
 
 # --- Pestaña 1: formulario tipado de un solo turno ---
 with tab_quick:
@@ -315,3 +426,65 @@ with tab_conversation:
                     "elapsed_time": round(time.perf_counter() - start_time, 2),
                 }
         render_metrics(metrics_placeholder, st.session_state.last_metrics)
+
+
+# --- Pestaña 3: estimación con fuentes verificables ---
+with tab_grounded:
+    st.caption(
+        "Cada línea de la estimación cita el fragmento de presupuesto histórico del que "
+        "se derivó, y el sistema verifica que esa fuente exista de verdad entre los "
+        "fragmentos recuperados. Los presupuestos históricos están en inglés: las "
+        "consultas en inglés dan mejores resultados."
+    )
+    with st.form("grounded_form"):
+        grounded_query = st.text_area(
+            "Descripción del proyecto",
+            placeholder="Ej.: Real-time payment gateway with fraud detection and settlement reconciliation",
+            height=120,
+            key="grounded_query",
+        )
+        gcol1, gcol2, gcol3 = st.columns(3)
+        grounded_search_mode = gcol1.selectbox(
+            "Tipo de búsqueda",
+            list(SEARCH_MODE_LABELS),
+            format_func=SEARCH_MODE_LABELS.get,
+            key="grounded_search_mode",
+        )
+        grounded_k = gcol2.number_input(
+            "Fragmentos a recuperar (k)", min_value=1, max_value=10, value=5, step=1,
+            key="grounded_k",
+        )
+        grounded_rerank = gcol3.checkbox(
+            "Reordenar con reranker (más lento)", key="grounded_rerank"
+        )
+        grounded_submitted = st.form_submit_button("Generar estimación con fuentes")
+
+    if grounded_submitted:
+        if len(grounded_query) < MIN_GROUNDED_QUERY_CHARS:
+            st.session_state.grounded_outcome = {
+                "error": f"La descripción debe tener al menos {MIN_GROUNDED_QUERY_CHARS} caracteres."
+            }
+        else:
+            try:
+                with st.spinner("Buscando fuentes y generando la estimación..."):
+                    st.session_state.grounded_outcome = {
+                        "body": call_grounded_estimate(
+                            {
+                                "query": grounded_query,
+                                "k": int(grounded_k),
+                                "search_mode": grounded_search_mode,
+                                "rerank": grounded_rerank,
+                            }
+                        )
+                    }
+            except RuntimeError as exc:
+                st.session_state.grounded_outcome = {"error": str(exc)}
+
+    # Se guarda en session_state para que el resultado siga visible aunque otra
+    # pestaña dispare un rerun.
+    outcome = st.session_state.get("grounded_outcome")
+    if outcome and "error" in outcome:
+        st.error(outcome["error"])
+    elif outcome:
+        st.subheader("Resultado")
+        render_grounded_result(outcome["body"])
