@@ -13,8 +13,11 @@ logger = structlog.get_logger(__name__)
 DEFAULT_MAX_ATTEMPTS = 3
 
 
-class EstimateGenerationError(RuntimeError):
-    """The model never produced an estimate that satisfies the schema rules."""
+class EstimateGenerationError(Exception):
+    """The model never produced an estimate that satisfies the schema rules.
+
+    Deliberately not a RuntimeError: the router maps RuntimeError to
+    "misconfigured" (500), and this is a model failure (502)."""
 
 
 def to_prompt_chunks(chunks: Sequence[RetrievedChunk]) -> list[dict]:
