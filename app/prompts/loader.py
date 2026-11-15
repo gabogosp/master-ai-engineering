@@ -12,6 +12,7 @@ PROMPTS_DIR = Path(__file__).parent / "estimation"
 METADATA_PROMPTS_DIR = Path(__file__).parent / "metadata_extraction"
 CONVERSATION_SUMMARY_PROMPTS_DIR = Path(__file__).parent / "conversation_summary"
 CRITIC_PROMPTS_DIR = Path(__file__).parent / "critic"
+GROUNDED_ESTIMATION_PROMPTS_DIR = Path(__file__).parent / "grounded_estimation"
 
 logger = structlog.get_logger(__name__)
 
@@ -58,6 +59,11 @@ def _conversation_summary_environment(version: str) -> Environment:
 def _critic_environment(version: str) -> Environment:
     """Mismo patrón, para los templates del Critic (app.critic)."""
     return _jinja_environment(CRITIC_PROMPTS_DIR, version)
+
+
+@lru_cache(maxsize=None)
+def _grounded_estimation_environment(version: str) -> Environment:
+    return _jinja_environment(GROUNDED_ESTIMATION_PROMPTS_DIR, version)
 
 
 def render_estimation_prompt(request: EstimationRequest, version: str = "v1") -> tuple[str, str]:
@@ -214,6 +220,23 @@ def render_critic_prompt(
         "tier": tier.value if hasattr(tier, "value") else str(tier),
         "result": result,
     }
+    system = env.get_template("system.j2").render(**context)
+    user = env.get_template("user.j2").render(**context)
+    return system, user
+
+
+def render_grounded_estimation_prompt(
+    *,
+    query: str,
+    chunks: list[dict],
+    version: str = "v1",
+) -> tuple[str, str]:
+    """Render (system, user) for line-level grounded estimation.
+
+    Each chunk dict must carry `chunk_id`, `document_id` and `content`: the
+    ids are what the model has to cite back verbatim."""
+    env = _grounded_estimation_environment(version)
+    context = {"query": query, "chunks": chunks}
     system = env.get_template("system.j2").render(**context)
     user = env.get_template("user.j2").render(**context)
     return system, user

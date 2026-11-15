@@ -1,0 +1,46 @@
+{
+  "description": "Golden set de 5 consultas con presupuestos históricos relevantes anotados a mano (usado para medir retrieval) y una estimación de referencia (ground_truth) por consulta (usada para medir generación con RAGAS). Cada ground_truth se deriva de las horas registradas en data/budgets_sample.json para los componentes que la consulta realmente pide; los componentes del mismo presupuesto que la consulta no menciona se dejan fuera a propósito. Las consultas y las referencias están en inglés porque el corpus está en inglés. Las referencias nombran el proyecto histórico (que figura en el texto de cada chunk) y no su id de presupuesto, porque el id no aparece en el contexto y un juez no puede verificar lo que no ve.",
+  "corpus": "data/budgets_sample.json",
+  "queries": [
+    {
+      "id": "Q1",
+      "query": "Online payment processing for checkout and order management",
+      "relevant_budget_ids": [
+        "BUD-2024-005"
+      ],
+      "ground_truth": "Checkout and order handling are covered by the cart and checkout service of the historical project \"Headless e-commerce storefront with personalized recommendations\", recorded at 140 hours. The catalog API, personalized recommendations and storefront PWA of that budget are not part of this request. Reference estimate: about 140 hours in total. There is no historical data for a standalone payment-provider integration."
+    },
+    {
+      "id": "Q2",
+      "query": "Real-time payment gateway with fraud detection and settlement reconciliation with the acquirer",
+      "relevant_budget_ids": [
+        "BUD-2024-003"
+      ],
+      "ground_truth": "All three requested modules exist in the historical project \"Real-time payments gateway with fraud detection and reconciliation\": payment gateway core, 220 hours; real-time fraud detection, 200 hours; settlement reconciliation, 120 hours. The merchant dashboard of that budget is not requested. Reference estimate: 540 hours in total."
+    },
+    {
+      "id": "Q3",
+      "query": "Remote patient monitoring platform ingesting wearable device data with alerts",
+      "relevant_budget_ids": [
+        "BUD-2024-010"
+      ],
+      "ground_truth": "The historical project \"Remote patient monitoring with wearable data ingestion and alerts\" covers both requested modules: wearable data ingestion, 180 hours; clinical alerting engine, 150 hours. The care team dashboard of that budget is not requested. Reference estimate: 330 hours in total."
+    },
+    {
+      "id": "Q4",
+      "query": "Factory IoT telemetry platform for predictive maintenance",
+      "relevant_budget_ids": [
+        "BUD-2024-013"
+      ],
+      "ground_truth": "The historical project \"Factory IoT telemetry and predictive maintenance system\" covers both requested modules: sensor telemetry ingestion, 170 hours; predictive maintenance models, 200 hours. The SCADA dashboard integration of that budget is not requested. Reference estimate: 370 hours in total."
+    },
+    {
+      "id": "Q5",
+      "query": "Multi-vendor marketplace with vendor payouts and buyer-seller dispute handling",
+      "relevant_budget_ids": [
+        "BUD-2024-006"
+      ],
+      "ground_truth": "The historical project \"Multi-vendor marketplace with vendor payouts and dispute handling\" covers both requested modules: vendor payouts engine, 140 hours; dispute and refund handling, 100 hours. Vendor onboarding and split order management exist in the same budget but are not part of this request. Reference estimate: 240 hours in total."
+    }
+  ]
+}
