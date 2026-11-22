@@ -18,3 +18,9 @@ def test_prompt_has_the_structured_sections():
     prompt = render_agent_system_prompt(max_iterations=10)
     for section in ("# Role", "# Objective", "# Context", "# Tools", "# Method", "# Constraints", "# Output format"):
         assert section in prompt
+
+
+def test_prompt_requires_comparable_references_to_cover_the_same_functions():
+    prompt = render_agent_system_prompt(max_iterations=10)
+    assert "same main functions" in prompt
+    assert "only shares the domain" in prompt
