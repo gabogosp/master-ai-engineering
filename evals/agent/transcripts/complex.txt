@@ -1,0 +1,32 @@
+Reunión de descubrimiento — Distribuciones Levante (plataforma "Reparto 360")
+Asistentes: Ricardo Soler (Director de Operaciones), Elena Cabrera (Responsable de Sistemas), equipo de estimación
+
+[00:00:12] Ricardo: Somos un distribuidor mayorista de productos de farmacia y parafarmacia con flota
+propia. Hoy gestionamos todo entre un programa antiguo y hojas de cálculo. Queremos una plataforma
+nueva, Reparto 360, y os adelanto que son piezas muy distintas entre sí.
+
+[00:01:05] Ricardo: La primera es el núcleo de negocio: pedidos de las farmacias, control de
+stock por almacén con reposición automática, y planificación de las rutas de reparto de cada día.
+Todo expuesto por API para que lo consuman el resto de piezas. Se construye desde cero.
+
+[00:02:40] Elena: La segunda es la conexión con nuestro ERP, que es SAP. Hay que sincronizar
+clientes, facturación y el maestro de artículos en ambos sentidos, con mapeo de IDocs, una capa
+intermedia y reintentos cuando SAP no responda. Ya tuvimos un proyecto de SAP que se complicó
+bastante, así que no lo deis por sencillo.
+
+[00:04:10] Ricardo: La tercera es una aplicación móvil para los conductores, Android e iOS. Ven su
+ruta del día, marcan cada entrega con firma del cliente y foto, y tiene que funcionar sin
+cobertura, sincronizando cuando vuelva la conexión.
+
+[00:05:30] Elena: Y la cuarta, un panel de análisis para dirección: porcentaje de entregas a
+tiempo, coste por ruta, incidencias, con filtros por zona y por cliente, y avisos cuando algún
+indicador se desvíe de lo habitual.
+
+[00:06:50] Consultor: Entonces cuatro componentes: el núcleo de pedidos, stock y rutas con su API;
+la integración con SAP; la app móvil de conductores con modo sin conexión; y el panel de análisis.
+
+[00:07:20] Ricardo: Correcto. Núcleo y SAP primero; app y panel pueden ir después, pero entran
+los cuatro en la estimación.
+
+[00:08:00] Elena: Sobre tecnología, nuestro equipo trabaja con Python y React. Para la app móvil
+nos da igual nativa o híbrida, y la base de datos la proponéis vosotros.

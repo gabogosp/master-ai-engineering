@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     # generator so the pipeline is not grading its own work.
     ragas_judge_model: str = "gpt-4o"
 
+    # --- Estimation agent (manual tool-calling loop) ---
+    agent_model: str = "gpt-5"
+    agent_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "medium"
+    # Hard stop for the loop, in addition to its natural exit.
+    agent_max_iterations: int = 10
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
