@@ -229,7 +229,7 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 
 ## Interfaz Web (Streamlit)
 
-`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python). Tiene tres pestañas, todas bloqueantes (ver nota sobre streaming más arriba):
+`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python). Tiene cuatro pestañas, todas bloqueantes (ver nota sobre streaming más arriba):
 
 **⚡ Estimación rápida**:
 - Formulario tipado: descripción + `project_type`/`detail_level`/`output_format`/`prompt_version`, y una sección opcional para proyectos de referencia.
@@ -247,6 +247,11 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 - Formulario: descripción del proyecto, tipo de búsqueda (híbrida o solo vectorial), cantidad de fragmentos a recuperar (`k`) y reranking opcional.
 - `POST /estimate/grounded` (ruta de primer nivel, no cuelga de `/api/v1`); ver la sección "Estimación con fuentes verificables".
 - El resultado muestra el resumen, las horas verificadas, cuántas líneas están fundamentadas, tienen una cita inválida o no tienen datos suficientes, y una tabla con un componente por fila. Cada componente se abre para ver su evidencia citada junto al texto real del fragmento histórico. Una cita a un fragmento que no existe en lo recuperado se muestra como error.
+
+**🤖 Agente de estimación**:
+- Cuadro para pegar la transcripción de una reunión, un selector con dos transcripciones de ejemplo (simple y compleja), y selectores de modelo (`gpt-5` o `gpt-5-mini`) y de esfuerzo de razonamiento.
+- `POST /estimate/agent` (ruta de primer nivel); ver la sección "Agente de estimación". El timeout del cliente es de 10 minutos, porque el agente encadena varias llamadas al modelo.
+- El resultado muestra el resumen, el total de horas, las iteraciones y búsquedas, una tabla con un componente por fila (horas, referencias y si tiene o no referencia), los supuestos y la traza paso a paso: cada paso se abre para ver su razonamiento, su acción y su observación. Avisa si el agente alcanzó el tope de iteraciones o si las horas finales no coinciden con su último cálculo.
 
 ## Conversación multi-turno con memoria
 
@@ -470,11 +475,31 @@ Reglas que se cumplen siempre: una línea fundamentada tiene al menos una fuente
 
 El diseño, el informe de verificación y la línea base de calidad (RAGAS) están en `calidad-generacion-ragas.md`.
 
+## Agente de estimación
+
+`POST /estimate/agent` recibe la transcripción de una reunión y devuelve la estimación junto con la traza de cada decisión. Un bucle escrito a mano sobre la Responses API de OpenAI deja que el modelo decida cuántas búsquedas hacer y en qué orden: separa el proyecto en componentes, busca presupuestos históricos para cada uno (`search_budgets`, que reutiliza la búsqueda híbrida con reranking), calcula con `calculate_estimate` (mediana de las referencias más un 15 % de contingencia) y comprueba el resultado con `validate_estimate`. Ninguna de las dos funciones de cálculo llama a un modelo.
+
+```bash
+python3 -c "import json,sys; print(json.dumps({'transcript': open(sys.argv[1]).read(), 'model': 'gpt-5-mini', 'effort': 'low'}))" \
+  evals/agent/transcripts/simple.txt \
+  | curl -X POST localhost:8000/estimate/agent -H "Content-Type: application/json" -d @-
+```
+
+Cuerpo de la petición: `transcript` (obligatorio, entre 50 y 60 000 caracteres), `model` (por defecto `gpt-5`) y `effort` (`minimal`, `low`, `medium` o `high`; por defecto `medium`). La respuesta trae `result` (la estimación por componente, `total_hours`, la traza estructurada, iteraciones, búsquedas y tokens) y `rendered_trace` con la traza en texto.
+
+Para ver la traza por consola sin pasar por HTTP:
+
+```bash
+PYTHONPATH=. uv run python scripts/run_agent.py evals/agent/transcripts/complex.txt --out evals/agent/trace_complex.txt
+```
+
+El diseño, la traza de la transcripción compleja y las limitaciones observadas están en `agente-estimacion.md`.
+
 ## Estructura
 
 ```
 master-ai-engineering/
-├── streamlit_app.py             # Cliente web (2 pestañas: formulario y conversación, las dos bloqueantes)
+├── streamlit_app.py             # Cliente web (4 pestañas: formulario, conversación, estimación con fuentes y agente; todas bloqueantes)
 ├── Dockerfile                    # Imagen del servicio "servicio_ia" (antes solo corría con uv run)
 ├── docker-compose.yml           # Redis Stack + Postgres/pgvector + servicio_ia
 ├── alembic.ini
@@ -486,12 +511,14 @@ master-ai-engineering/
 │   └── budgets_sample.json      # 15 presupuestos históricos reales (fintech/e-commerce/healthcare/industrial)
 ├── scripts/
 │   ├── seed_corpus.py             # Ingesta data/budgets_sample.json completo, un POST /embeddings/ingest por presupuesto (idempotente)
-│   └── query_examples.py          # Ejercita POST /search con 5 queries representativas del corpus
+│   ├── query_examples.py          # Ejercita POST /search con 5 queries representativas del corpus
+│   └── run_agent.py               # Ejecuta el agente de estimación sobre una transcripción e imprime su traza
 ├── evals/
 │   ├── dataset.py                # GoldenCase + load_dataset()
 │   ├── golden_dataset.json       # 16 casos dorados
 │   ├── metrics.py                # SchemaAdherenceMetric, CostBoundsMetric, ContentRecallMetric
 │   ├── run.py                     # CLI: uv run python -m evals.run --mode actor|acb
+│   ├── agent/                     # Transcripciones de prueba del agente y la traza de la compleja
 │   └── stress/
 │       ├── scenarios.py           # 3 perfiles multi-turno (growing/pivot/contradiction) para el stress-test del CAG
 │       └── fixtures/

@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import httpx
 import streamlit as st
@@ -236,6 +237,130 @@ def render_grounded_result(body: dict) -> None:
     st.caption(f"Identificador de la petición (para buscarla en los logs): `{body['request_id']}`")
 
 
+AGENT_STOP_LABELS = {
+    "completed": "Terminó por sí solo",
+    "max_iterations": "Alcanzó el tope de iteraciones",
+}
+AGENT_MODELS = ["gpt-5", "gpt-5-mini"]
+AGENT_EFFORTS = ["minimal", "low", "medium", "high"]
+MIN_AGENT_TRANSCRIPT_CHARS = 50
+AGENT_TIMEOUT_SECONDS = 600.0
+AGENT_SAMPLES_DIR = Path(__file__).parent / "evals" / "agent" / "transcripts"
+AGENT_SAMPLES = {
+    "— Escribir o pegar una transcripción —": None,
+    "Ejemplo simple (1 componente)": "simple.txt",
+    "Ejemplo complejo (varios componentes)": "complex.txt",
+}
+
+
+def load_agent_sample() -> None:
+    """Callback of the sample selector: copies the chosen transcript into the
+    text box. If the file is unavailable, the text is left as it is."""
+    filename = AGENT_SAMPLES.get(st.session_state.get("agent_sample"))
+    if filename is None:
+        return
+    try:
+        st.session_state.agent_transcript = (AGENT_SAMPLES_DIR / filename).read_text(encoding="utf-8")
+    except OSError:
+        pass
+
+
+def call_agent_estimate(payload: dict) -> dict:
+    """Blocking POST to /estimate/agent (a top-level route). The agent chains
+    several model calls, so the timeout is much longer than in the other tabs."""
+    url = f"{settings.backend_url}/estimate/agent"
+    try:
+        with httpx.Client(timeout=httpx.Timeout(AGENT_TIMEOUT_SECONDS)) as client:
+            response = client.post(url, json=payload)
+    except httpx.RequestError as exc:
+        raise RuntimeError(f"No se pudo conectar con el servicio: {exc}") from exc
+
+    if response.status_code != 200:
+        detail = response.text
+        if "application/json" in response.headers.get("content-type", ""):
+            detail = response.json().get("detail", detail)
+        raise RuntimeError(f"Error {response.status_code}: {detail}")
+
+    return response.json()
+
+
+def render_agent_result(body: dict) -> None:
+    """Shows the agent's estimate: totals, hours per component with their
+    references, assumptions and the step-by-step trace (reasoning, action and
+    observation of each decision)."""
+    result = body["result"]
+    estimate = result["estimate"]
+    components = estimate["components"]
+    unbudgeted = [c["name"] for c in components if not c["has_references"]]
+
+    st.markdown(estimate["summary"])
+
+    cols = st.columns(4)
+    cols[0].metric("Total estimado (h)", f"{result['total_hours']:g}")
+    cols[1].metric("Iteraciones", result["iterations"])
+    cols[2].metric("Búsquedas", result["search_calls"])
+    cols[3].metric("Componentes sin referencia", len(unbudgeted))
+    st.caption(
+        f"{AGENT_STOP_LABELS.get(result['stopped_reason'], result['stopped_reason'])} · "
+        f"modelo {result['model']} · {result['input_tokens']:,} tokens de entrada, "
+        f"{result['output_tokens']:,} de salida"
+    )
+
+    if result["stopped_reason"] != "completed":
+        st.warning(
+            "El agente alcanzó el tope de iteraciones antes de terminar: la estimación "
+            "se construyó con lo reunido hasta ese punto."
+        )
+    if result["consistent_with_calculation"] is False:
+        st.warning(
+            "Las horas finales no coinciden con el último cálculo del agente. "
+            "Revisa el detalle antes de usar el total."
+        )
+    if unbudgeted:
+        st.info(
+            "Sin referencia comparable en el archivo histórico: "
+            + ", ".join(unbudgeted)
+            + ". Se cuentan como 0 horas, así que el total es un mínimo."
+        )
+
+    st.dataframe(
+        [
+            {
+                "Componente": component["name"],
+                "Horas": component["hours"],
+                "Referencias": ", ".join(component["reference_budget_ids"]) or "—",
+                "Estado": "✅ Con referencia" if component["has_references"] else "➖ Sin referencia",
+            }
+            for component in components
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+
+    for component in components:
+        with st.expander(f"{component['name']} · {component['hours']:g} h"):
+            st.markdown(component["rationale"])
+
+    if estimate["assumptions"]:
+        st.markdown("**Supuestos y avisos**")
+        for assumption in estimate["assumptions"]:
+            st.markdown(f"- {assumption}")
+
+    steps = result["trace"]["steps"]
+    st.subheader(f"Traza del agente ({len(steps)} pasos)")
+    for step in steps:
+        with st.expander(f"Paso {step['index']} · {step['action'].split('(')[0]}"):
+            st.markdown("**Razonamiento**")
+            st.markdown(step["reasoning"])
+            st.markdown("**Acción**")
+            st.code(step["action"], language=None, wrap_lines=True)
+            st.markdown("**Observación**")
+            st.code(step["observation"], language=None, wrap_lines=True)
+
+    with st.expander("📄 Traza completa en texto"):
+        st.code(body["rendered_trace"], language=None, wrap_lines=True)
+
+
 # --- Barra lateral: observabilidad de la última llamada (estimación rápida) ---
 with st.sidebar:
     st.header("🧠 Observabilidad")
@@ -252,8 +377,8 @@ render_prompt_preview(
 render_metrics(metrics_placeholder, st.session_state.get("last_metrics"))
 
 
-tab_quick, tab_conversation, tab_grounded = st.tabs(
-    ["⚡ Estimación rápida", "💬 Conversación", "🔎 Estimación con fuentes"]
+tab_quick, tab_conversation, tab_grounded, tab_agent = st.tabs(
+    ["⚡ Estimación rápida", "💬 Conversación", "🔎 Estimación con fuentes", "🤖 Agente de estimación"]
 )
 
 # --- Pestaña 1: formulario tipado de un solo turno ---
@@ -488,3 +613,69 @@ with tab_grounded:
     elif outcome:
         st.subheader("Resultado")
         render_grounded_result(outcome["body"])
+
+
+# --- Tab 4: estimation agent (manual tool-calling loop) ---
+with tab_agent:
+    st.caption(
+        "Pega la transcripción de una reunión. El agente decide por sí mismo cuántas "
+        "búsquedas hacer: separa el proyecto en componentes, busca presupuestos históricos "
+        "para cada uno, calcula y valida. Puede tardar uno o dos minutos. El archivo "
+        "histórico es pequeño, así que algunos componentes pueden quedar sin referencia, "
+        "y el total puede variar entre ejecuciones."
+    )
+    st.selectbox(
+        "Cargar un ejemplo",
+        list(AGENT_SAMPLES),
+        key="agent_sample",
+        on_change=load_agent_sample,
+    )
+    with st.form("agent_form"):
+        agent_transcript = st.text_area(
+            "Transcripción de la reunión",
+            height=260,
+            key="agent_transcript",
+        )
+        acol1, acol2 = st.columns(2)
+        agent_model = acol1.selectbox(
+            "Modelo",
+            AGENT_MODELS,
+            index=AGENT_MODELS.index(settings.agent_model) if settings.agent_model in AGENT_MODELS else 0,
+            key="agent_model",
+        )
+        agent_effort = acol2.selectbox(
+            "Esfuerzo de razonamiento",
+            AGENT_EFFORTS,
+            index=AGENT_EFFORTS.index(settings.agent_reasoning_effort),
+            key="agent_effort",
+        )
+        agent_submitted = st.form_submit_button("Ejecutar el agente")
+
+    if agent_submitted:
+        if len(agent_transcript) < MIN_AGENT_TRANSCRIPT_CHARS:
+            st.session_state.agent_outcome = {
+                "error": f"La transcripción debe tener al menos {MIN_AGENT_TRANSCRIPT_CHARS} caracteres."
+            }
+        else:
+            try:
+                with st.spinner("El agente está trabajando (puede tardar uno o dos minutos)..."):
+                    st.session_state.agent_outcome = {
+                        "body": call_agent_estimate(
+                            {
+                                "transcript": agent_transcript,
+                                "model": agent_model,
+                                "effort": agent_effort,
+                            }
+                        )
+                    }
+            except RuntimeError as exc:
+                st.session_state.agent_outcome = {"error": str(exc)}
+
+    # Kept in session_state so the result stays visible even if another tab
+    # triggers a rerun.
+    agent_outcome = st.session_state.get("agent_outcome")
+    if agent_outcome and "error" in agent_outcome:
+        st.error(agent_outcome["error"])
+    elif agent_outcome:
+        st.subheader("Resultado")
+        render_agent_result(agent_outcome["body"])

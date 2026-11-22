@@ -13,6 +13,7 @@ METADATA_PROMPTS_DIR = Path(__file__).parent / "metadata_extraction"
 CONVERSATION_SUMMARY_PROMPTS_DIR = Path(__file__).parent / "conversation_summary"
 CRITIC_PROMPTS_DIR = Path(__file__).parent / "critic"
 GROUNDED_ESTIMATION_PROMPTS_DIR = Path(__file__).parent / "grounded_estimation"
+AGENT_PROMPTS_DIR = Path(__file__).parent / "agent"
 
 logger = structlog.get_logger(__name__)
 
@@ -240,3 +241,15 @@ def render_grounded_estimation_prompt(
     system = env.get_template("system.j2").render(**context)
     user = env.get_template("user.j2").render(**context)
     return system, user
+
+
+@lru_cache(maxsize=None)
+def _agent_environment(version: str) -> Environment:
+    return _jinja_environment(AGENT_PROMPTS_DIR, version)
+
+
+def render_agent_system_prompt(*, max_iterations: int, version: str = "v1") -> str:
+    """System prompt of the estimation agent. The transcript travels as the
+    user input, not inside the prompt; the turn budget is the only variable,
+    so the model can plan its searches against it."""
+    return _agent_environment(version).get_template("system.j2").render(max_iterations=max_iterations)

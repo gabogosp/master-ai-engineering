@@ -1,0 +1,12 @@
+Reunión de descubrimiento — Clínica Mirador
+Asistentes: Marta Ibáñez (Directora Médica), equipo de estimación
+
+[00:00:10] Marta: Necesitamos un sistema para monitorizar a distancia a pacientes crónicos. Los
+pacientes llevan una pulsera que mide pulso y oxígeno, y queremos recibir esos datos de forma
+continua, guardarlos y que el sistema avise al equipo de enfermería cuando una lectura se salga de
+los rangos normales.
+
+[00:01:30] Consultor: ¿Hay algo más en el alcance, como una app o un panel?
+
+[00:01:42] Marta: No, por ahora solo la ingesta de las lecturas y las alertas. Lo demás vendrá en
+una segunda fase y no hace falta estimarlo.
