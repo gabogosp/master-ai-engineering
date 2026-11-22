@@ -84,9 +84,11 @@ def test_streamlit_initial_render():
 
         assert not at.exception
         assert at.title[0].value == "📋 Estimador de Proyectos"
-        assert len(at.text_area) == 2  # estimación rápida + estimación con fuentes
+        # estimación rápida + estimación con fuentes + agente
+        assert len(at.text_area) == 3
         # tipo, detalle, formato, versión de prompt + tipo de búsqueda (con fuentes)
-        assert len(at.selectbox) == 5
+        # + ejemplo, modelo y esfuerzo (agente)
+        assert len(at.selectbox) == 8
         assert len(at.sidebar) > 0
         assert at.session_state["session_id"] == FAKE_SESSION_ID
 
@@ -268,7 +270,7 @@ def _ok(**kwargs) -> _GroundedBackend:
     return _GroundedBackend(httpx.Response(200, json=_grounded_body(**kwargs)))
 
 
-def test_grounded_tab_is_present_alongside_the_other_two():
+def test_grounded_tab_is_present_alongside_the_other_tabs():
     with patch("httpx.Client", side_effect=_mock_httpx_client):
         at = AppTest.from_file(APP_PATH).run()
 
@@ -276,6 +278,7 @@ def test_grounded_tab_is_present_alongside_the_other_two():
         "⚡ Estimación rápida",
         "💬 Conversación",
         "🔎 Estimación con fuentes",
+        "🤖 Agente de estimación",
     ]
 
 
@@ -410,3 +413,199 @@ def test_the_result_stays_visible_after_the_page_reruns():
 
     assert len(backend.requests) == 1
     assert {m.label: m.value for m in at.metric}["Horas verificadas"] == "220"
+
+
+# --- Pestaña del agente de estimación ---------------------------------------
+
+AGENT_BUTTON = "Ejecutar el agente"
+AGENT_TRANSCRIPT = "Reunión de descubrimiento. " + "Necesitamos una plataforma con varias piezas. " * 4
+
+
+def _agent_body(*, stopped="completed", consistent=True) -> dict:
+    components = [
+        {
+            "name": "Order management API",
+            "hours": 195.5,
+            "reference_budget_ids": ["BUD-2024-006"],
+            "rationale": "Comparable order lifecycle scope.",
+            "has_references": True,
+        },
+        {
+            "name": "SAP integration",
+            "hours": 0.0,
+            "reference_budget_ids": [],
+            "rationale": "No comparable reference in the archive.",
+            "has_references": False,
+        },
+    ]
+    steps = [
+        {
+            "index": 1,
+            "reasoning": "Two components, search both.",
+            "action": 'search_budgets({"query": "order API", "filters": null})',
+            "observation": "5 items for 'order API'",
+        },
+        {
+            "index": 2,
+            "reasoning": "Cost them.",
+            "action": "calculate_estimate({})",
+            "observation": "total=195.5h across 2 components",
+        },
+    ]
+    return {
+        "result": {
+            "estimate": {
+                "components": components,
+                "assumptions": ["No comparable budget found for SAP integration."],
+                "summary": "Partial coverage of the archive.",
+            },
+            "total_hours": 195.5,
+            "consistent_with_calculation": consistent,
+            "trace": {"steps": steps},
+            "iterations": 5,
+            "stopped_reason": stopped,
+            "search_calls": 9,
+            "model": "gpt-5",
+            "input_tokens": 46_000,
+            "output_tokens": 6_800,
+        },
+        "rendered_trace": "STEP 1\n  reasoning:   Two components, search both.",
+    }
+
+
+class _AgentBackend(_GroundedBackend):
+    def _handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/estimate/agent":
+            return _fake_handler(request)
+        import json
+
+        self.requests.append(json.loads(request.content))
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
+
+
+def _agent_ok(**kwargs) -> _AgentBackend:
+    return _AgentBackend(httpx.Response(200, json=_agent_body(**kwargs)))
+
+
+def _run_agent(backend: _AgentBackend, *, transcript=AGENT_TRANSCRIPT, configure=None):
+    with patch("httpx.Client", side_effect=backend.factory):
+        at = AppTest.from_file(APP_PATH).run()
+        at.text_area(key="agent_transcript").set_value(transcript)
+        if configure:
+            configure(at)
+        _find_button(at, AGENT_BUTTON).click().run()
+        return at
+
+
+def test_agent_tab_shows_totals_components_and_summary():
+    at = _run_agent(_agent_ok())
+
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Total estimado (h)"] == "195.5"
+    assert metrics["Iteraciones"] == "5" and metrics["Búsquedas"] == "9"
+    assert metrics["Componentes sin referencia"] == "1"
+    assert any("Partial coverage of the archive." in m.value for m in at.markdown)
+    rows = at.dataframe[-1].value
+    assert list(rows["Componente"]) == ["Order management API", "SAP integration"]
+    assert list(rows["Estado"]) == ["✅ Con referencia", "➖ Sin referencia"]
+
+
+def test_agent_tab_flags_components_without_reference_and_lists_assumptions():
+    at = _run_agent(_agent_ok())
+
+    assert any("SAP integration" in i.value and "es un mínimo" in i.value for i in at.info)
+    assert any("No comparable budget found for SAP integration." in m.value for m in at.markdown)
+
+
+def test_agent_tab_shows_each_trace_step_with_reasoning_action_and_observation():
+    at = _run_agent(_agent_ok())
+
+    labels = [e.label for e in at.expander]
+    assert "Paso 1 · search_budgets" in labels and "Paso 2 · calculate_estimate" in labels
+    step_one = next(e for e in at.expander if e.label == "Paso 1 · search_budgets")
+    assert any("Two components, search both." in m.value for m in step_one.markdown)
+    assert any("search_budgets(" in c.value for c in step_one.code)
+    assert any("5 items for 'order API'" in c.value for c in step_one.code)
+    assert any(label == "📄 Traza completa en texto" for label in labels)
+
+
+def test_agent_tab_warns_when_the_iteration_cap_was_reached():
+    at = _run_agent(_agent_ok(stopped="max_iterations"))
+
+    assert any("tope de iteraciones" in w.value for w in at.warning)
+
+
+def test_agent_tab_warns_when_final_hours_differ_from_the_last_calculation():
+    at = _run_agent(_agent_ok(consistent=False))
+
+    assert any("no coinciden con el último cálculo" in w.value for w in at.warning)
+
+
+def test_agent_default_request_uses_the_configured_model_and_effort():
+    backend = _agent_ok()
+    _run_agent(backend)
+
+    assert backend.requests == [
+        {"transcript": AGENT_TRANSCRIPT, "model": "gpt-5", "effort": "medium"}
+    ]
+
+
+def test_agent_chosen_model_and_effort_are_sent_to_the_backend():
+    backend = _agent_ok()
+
+    def configure(at):
+        at.selectbox(key="agent_model").select("gpt-5-mini")
+        at.selectbox(key="agent_effort").select("low")
+
+    _run_agent(backend, configure=configure)
+
+    assert backend.requests[0]["model"] == "gpt-5-mini" and backend.requests[0]["effort"] == "low"
+
+
+def test_agent_short_transcript_is_rejected_without_calling_the_backend():
+    backend = _agent_ok()
+    at = _run_agent(backend, transcript="Muy corta")
+
+    assert backend.requests == []
+    assert any("al menos 50 caracteres" in e.value for e in at.error)
+
+
+def test_agent_backend_errors_are_shown_with_their_detail():
+    backend = _AgentBackend(
+        httpx.Response(502, json={"detail": "The agent could not produce an estimate."})
+    )
+    at = _run_agent(backend)
+
+    assert not at.exception
+    assert any("Error 502" in e.value and "could not produce" in e.value for e in at.error)
+
+
+def test_agent_connection_failures_are_shown_as_a_readable_error():
+    at = _run_agent(_AgentBackend(httpx.ConnectError("connection refused")))
+
+    assert not at.exception
+    assert any("No se pudo conectar con el servicio" in e.value for e in at.error)
+
+
+def test_agent_sample_selector_loads_the_example_transcript_into_the_text_box():
+    with patch("httpx.Client", side_effect=_mock_httpx_client):
+        at = AppTest.from_file(APP_PATH).run()
+        at.selectbox(key="agent_sample").select("Ejemplo simple (1 componente)").run()
+
+    assert not at.exception
+    assert "Clínica Mirador" in at.text_area(key="agent_transcript").value
+
+
+def test_agent_result_stays_visible_after_the_page_reruns():
+    backend = _agent_ok()
+    with patch("httpx.Client", side_effect=backend.factory):
+        at = AppTest.from_file(APP_PATH).run()
+        at.text_area(key="agent_transcript").set_value(AGENT_TRANSCRIPT)
+        _find_button(at, AGENT_BUTTON).click().run()
+        at.run()
+
+    assert len(backend.requests) == 1
+    assert {m.label: m.value for m in at.metric}["Total estimado (h)"] == "195.5"

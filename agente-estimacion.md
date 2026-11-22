@@ -99,17 +99,20 @@ La traza incluida en el repositorio (`evals/agent/trace_complex.txt`) es la de l
 
 ## 6. Pruebas
 
-57 tests nuevos (331 en total), todos sin red gracias a un cliente falso que reproduce respuestas guionadas y registra cada llamada:
+69 tests nuevos (343 en total), todos sin red gracias a un cliente falso que reproduce respuestas guionadas y registra cada llamada:
 
 - **Esquemas**: forma plana, `strict`, y cada objeto anidado con `required` igual a sus propiedades y `additionalProperties: false`.
 - **Herramientas**: mediana y contingencia, componente sin referencias, cada código de `validate_estimate`, tolerancia de redondeo, mapeo de chunks a ítems, uso de búsqueda híbrida con reranking, filtros por metadatos y el despachador con entradas inválidas.
 - **Bucle**: terminación natural, cada `function_call_output` con su `call_id`, encadenamiento con `previous_response_id`, ajustes de razonamiento y herramientas en la primera llamada, forma de la traza, total calculado en código y coherencia con el cálculo, suma de tokens, tope de iteraciones (con las llamadas pendientes contestadas), argumentos inválidos devueltos al modelo y salida estructurada no interpretable.
 - **HTTP**: respuesta con traza renderizada, valores por defecto y sobrescritura de modelo y esfuerzo, `422` ante peticiones inválidas, `502` ante fallos del agente o de OpenAI, `500` ante configuración ausente.
+- **Interfaz** (`tests/test_stream_and_ui.py`, con `AppTest` y un backend simulado): la pestaña del agente muestra totales, componentes con y sin referencia, supuestos y cada paso de la traza con su razonamiento, acción y observación; avisa del tope de iteraciones y de las horas que no coinciden con el cálculo; envía el modelo y el esfuerzo elegidos; rechaza transcripciones cortas sin llamar al servicio; muestra los errores del servicio y los fallos de conexión; carga los ejemplos; y conserva el resultado tras un nuevo renderizado.
 - **Prompt**: nombra las tres herramientas, el presupuesto de turnos, las reglas de consultas en inglés y de no inventar horas, conserva las secciones de rol, objetivo, contexto, herramientas, método, restricciones y formato de salida, y exige que una referencia cubra las mismas funciones principales y no solo el dominio.
 
-Además se verificó el endpoint contra el servicio real en Docker (`gpt-5-mini`, transcripción simple: 6 iteraciones, 3 búsquedas, total coherente) y que una transcripción demasiado corta devuelve `422`.
+Además se verificó la pestaña contra el servicio real (con `AppTest`, sin navegador) y el endpoint en Docker (`gpt-5-mini`, transcripción simple: 6 iteraciones, 3 búsquedas, total coherente) y que una transcripción demasiado corta devuelve `422`.
 
 ## 7. Cómo probarlo
+
+Desde la interfaz: `uv run streamlit run streamlit_app.py`, pestaña **Agente de estimación**, elegir un ejemplo y pulsar «Ejecutar el agente». Por consola o con los tests:
 
 ```bash
 # Traza por consola (necesita la base levantada con el corpus ingerido)
@@ -128,4 +131,3 @@ uv run pytest tests/agent tests/prompts/test_agent_prompt.py -v
 - Las horas de cada componente son la mediana de las referencias más un 15 % fijo. No se ajustan por tecnología, complejidad ni año.
 - El agente decide qué referencias son comparables y su criterio varía entre ejecuciones (el total de la transcripción compleja osciló entre 563,5 y 845,2 h). A diferencia del pipeline con fuentes, no hay un verificador que compruebe cita por cita ni un umbral de relevancia por código; ambos serían la forma de dejar de depender solo del prompt. Una mejora natural es pasar la estimación final del agente por `verify_citations`.
 - Los resúmenes de razonamiento los decide la API: en varios turnos de la ejecución real no se devolvió ninguno.
-- No hay interfaz en Streamlit para este endpoint.

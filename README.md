@@ -229,7 +229,7 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 
 ## Interfaz Web (Streamlit)
 
-`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python). Tiene tres pestañas, todas bloqueantes (ver nota sobre streaming más arriba):
+`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python). Tiene cuatro pestañas, todas bloqueantes (ver nota sobre streaming más arriba):
 
 **⚡ Estimación rápida**:
 - Formulario tipado: descripción + `project_type`/`detail_level`/`output_format`/`prompt_version`, y una sección opcional para proyectos de referencia.
@@ -246,8 +246,12 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 **🔎 Estimación con fuentes**:
 - Formulario: descripción del proyecto, tipo de búsqueda (híbrida o solo vectorial), cantidad de fragmentos a recuperar (`k`) y reranking opcional.
 - `POST /estimate/grounded` (ruta de primer nivel, no cuelga de `/api/v1`); ver la sección "Estimación con fuentes verificables".
-- `POST /estimate/agent` (también de primer nivel); ver la sección "Agente de estimación".
 - El resultado muestra el resumen, las horas verificadas, cuántas líneas están fundamentadas, tienen una cita inválida o no tienen datos suficientes, y una tabla con un componente por fila. Cada componente se abre para ver su evidencia citada junto al texto real del fragmento histórico. Una cita a un fragmento que no existe en lo recuperado se muestra como error.
+
+**🤖 Agente de estimación**:
+- Cuadro para pegar la transcripción de una reunión, un selector con dos transcripciones de ejemplo (simple y compleja), y selectores de modelo (`gpt-5` o `gpt-5-mini`) y de esfuerzo de razonamiento.
+- `POST /estimate/agent` (ruta de primer nivel); ver la sección "Agente de estimación". El timeout del cliente es de 10 minutos, porque el agente encadena varias llamadas al modelo.
+- El resultado muestra el resumen, el total de horas, las iteraciones y búsquedas, una tabla con un componente por fila (horas, referencias y si tiene o no referencia), los supuestos y la traza paso a paso: cada paso se abre para ver su razonamiento, su acción y su observación. Avisa si el agente alcanzó el tope de iteraciones o si las horas finales no coinciden con su último cálculo.
 
 ## Conversación multi-turno con memoria
 
@@ -495,7 +499,7 @@ El diseño, la traza de la transcripción compleja y las limitaciones observadas
 
 ```
 master-ai-engineering/
-├── streamlit_app.py             # Cliente web (2 pestañas: formulario y conversación, las dos bloqueantes)
+├── streamlit_app.py             # Cliente web (4 pestañas: formulario, conversación, estimación con fuentes y agente; todas bloqueantes)
 ├── Dockerfile                    # Imagen del servicio "servicio_ia" (antes solo corría con uv run)
 ├── docker-compose.yml           # Redis Stack + Postgres/pgvector + servicio_ia
 ├── alembic.ini
