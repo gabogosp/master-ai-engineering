@@ -31,10 +31,15 @@ logger = structlog.get_logger(__name__)
 
 NO_SUMMARY = "(the model returned no reasoning summary for this turn)"
 FINAL_REQUEST = (
-    "The analysis is complete. Return the final estimate as structured output. One entry per "
-    "component. Use exactly the hours calculate_estimate returned (0 and has_references=false for "
-    "a component with no references), and list in reference_budget_ids the budgets you used. "
-    "Put any issue reported by validate_estimate, and any weak or missing evidence, in assumptions."
+    "The analysis is complete. Return the final estimate as structured output.\n"
+    "- One entry per component identified in the analysis.\n"
+    "- hours: exactly the value calculate_estimate returned for that component, with no changes.\n"
+    "- has_references: false, and hours 0, for a component with no comparable reference.\n"
+    "- reference_budget_ids: the budget ids of the references you actually used; empty if none.\n"
+    "- rationale: one or two sentences saying why those references fit, or why none did.\n"
+    "- assumptions: every issue validate_estimate reported, plus any weak match or missing evidence. "
+    "Do not add assumptions unrelated to the evidence.\n"
+    "- summary: two sentences at most, covering how well the archive covers the project."
 )
 
 

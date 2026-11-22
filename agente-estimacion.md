@@ -50,10 +50,10 @@ Las descripciones están escritas para un lector que solo ve el esquema: dicen c
 Cada paso registra razonamiento, acción y observación. El razonamiento es el resumen que emite la propia API (`reasoning={"summary": "auto"}`); cuando un turno no devuelve resumen, la traza lo dice en lugar de inventarlo. Si el modelo pide varias herramientas en un mismo turno, solo el primer paso lleva el razonamiento y los demás lo indican.
 
 ```
-STEP 11
+STEP 10
   reasoning:   <resumen de razonamiento del modelo>
   action:      calculate_estimate({"components": [...]})
-  observation: total=425.5h across 6 components; no references for: Order management API (B2B pharmacies), SAP integration via IDocs (...), Offline-capable driver mobile app (Android & iOS)
+  observation: total=621.0h across 6 components; no references for: SAP ERP integration (IDocs sync), Driver mobile app (offline PoD)
 ```
 
 La traza completa de la transcripción compleja está en `evals/agent/trace_complex.txt`.
@@ -64,30 +64,30 @@ Transcripción: `evals/agent/transcripts/complex.txt`, un distribuidor farmacéu
 
 | Medida | Valor |
 |---|---|
-| Iteraciones del bucle | 8 de 10 posibles |
-| Llamadas a `search_budgets` | 10 |
+| Iteraciones del bucle | 5 de 10 posibles |
+| Llamadas a `search_budgets` | 9 |
 | Componentes identificados | 6 (el modelo separó pedidos, stock y rutas) |
 | Llamadas a `calculate_estimate` / `validate_estimate` | 1 / 1 |
 | Terminación | Por sí solo (`stopped_reason: completed`) |
-| Total | 425,5 h, coincide con el cálculo (`consistent_with_calculation: true`) |
-| Tokens | 74 787 de entrada, 7 164 de salida |
+| Total | 621,0 h, coincide con el cálculo (`consistent_with_calculation: true`) |
+| Tokens | 43 876 de entrada, 6 833 de salida |
 
 | Componente | Horas | Referencia |
 |---|---|---|
 | Gestión de inventario con reposición automática | 161,0 | BUD-2024-011 |
 | Planificación diaria de rutas | 207,0 | BUD-2024-007 |
 | Panel de análisis con filtros y alertas | 57,5 | BUD-2024-014 (cobertura parcial) |
-| API de pedidos B2B | 0 | sin referencia comparable |
+| API de pedidos | 195,5 | BUD-2024-006 (sector y tecnología distintos; sin webhooks explícitos) |
 | Integración con SAP vía IDocs | 0 | sin referencia comparable |
 | App móvil de conductores con modo sin conexión | 0 | sin referencia comparable |
 
-El resultado es útil precisamente porque no está completo. El corpus no contiene ningún proyecto de SAP, ninguna app móvil de reparto y ningún sistema de pedidos mayoristas. El agente lo detectó tras buscar con dos formulaciones distintas, dejó esos tres componentes en cero, los marcó como sin presupuesto, y `validate_estimate` lo confirmó con tres hallazgos `no_reference` que quedaron recogidos como supuestos. El total de 425,5 h es por tanto un mínimo, no una estimación del proyecto entero.
+El resultado es útil precisamente porque no está completo. El corpus no contiene ningún proyecto de SAP ni ninguna app móvil de reparto. El agente lo detectó tras buscar con dos formulaciones distintas para cada uno, dejó esos dos componentes en cero, los marcó como sin presupuesto, y `validate_estimate` lo confirmó con dos hallazgos `no_reference` que quedaron recogidos como supuestos. Los otros cuatro componentes se apoyan en referencias parciales, y el agente lo declara en los supuestos: la de pedidos es de un sector distinto, la de rutas está en otro lenguaje y la del panel es un reporte genérico sin alertas. El total de 621,0 h es por tanto un mínimo, no una estimación del proyecto entero.
 
-**Comparación con el pipeline fijo.** Con la misma transcripción, `POST /estimate/grounded` (una sola recuperación para todo el texto) devolvió los cuatro componentes sin respaldo y 0 horas en total. Una única consulta que mezcla piezas sin relación trae fragmentos mezclados y el modelo, correctamente, no los usa. La búsqueda por componente es lo que permite al agente aprovechar el corpus. La contrapartida es que el agente tiene más margen de criterio: aceptó como referencia del panel un componente de reporte de operaciones de almacén, de 50 horas, y lo declaró como cobertura parcial. El pipeline con fuentes verificables es más estricto en ese punto.
+**Comparación con el pipeline fijo.** Con la misma transcripción, `POST /estimate/grounded` (una sola recuperación para todo el texto) devolvió los cuatro componentes sin respaldo y 0 horas en total. Una única consulta que mezcla piezas sin relación trae fragmentos mezclados y el modelo, correctamente, no los usa. La búsqueda por componente es lo que permite al agente aprovechar el corpus. La contrapartida es que el agente tiene más margen de criterio: aceptó como referencia del panel un componente de reporte de operaciones de almacén, de 50 horas, y como referencia de pedidos un componente de marketplace, y declaró ambos como cobertura parcial. El pipeline con fuentes verificables es más estricto en ese punto.
 
 ## 5. Decisiones y problemas encontrados
 
-- **La primera versión del prompt no terminaba.** Pedía refinar las búsquedas hasta tener referencias. Con el corpus sin SAP ni móvil, el modelo encadenó 14 búsquedas, agotó las 10 iteraciones y nunca llamó a `calculate_estimate`, así que la estimación final quedó en cero. El tope funcionó como salvaguarda y el cierre estructurado no inventó horas, pero el comportamiento era inaceptable. Se corrigió en el prompt: se limita el refinamiento a una búsqueda extra por componente, se declara que la ausencia de referencias es un hallazgo válido, y se informa al modelo de su presupuesto de turnos, con la obligación de calcular antes de agotarlo. Es una decisión de diseño de agentes: un modelo que desconoce su límite tiende a seguir buscando.
+- **La primera versión del prompt no terminaba.** Pedía refinar las búsquedas hasta tener referencias. Con el corpus sin SAP ni móvil, el modelo encadenó 14 búsquedas, agotó las 10 iteraciones y nunca llamó a `calculate_estimate`, así que la estimación final quedó en cero. El tope funcionó como salvaguarda y el cierre estructurado no inventó horas, pero el comportamiento era inaceptable. Se corrigió en el prompt (después se reestructuró en secciones de rol, objetivo, contexto, herramientas, método, restricciones y formato de salida, con términos como «comparable» y «componente distinto» definidos): se limita el refinamiento a una búsqueda extra por componente, se declara que la ausencia de referencias es un hallazgo válido, y se informa al modelo de su presupuesto de turnos, con la obligación de calcular antes de agotarlo. Es una decisión de diseño de agentes: un modelo que desconoce su límite tiende a seguir buscando.
 - **La estimación estructurada se pide en una llamada aparte**, encadenada a la última respuesta, con `responses.parse` y un esquema sin restricciones de campo (el modo estricto no las admite). El total no lo escribe el modelo: se suma en código a partir de los componentes y se compara con el último `calculate_estimate` para exponer cualquier discrepancia.
 - **Las consultas van en inglés.** El corpus está en inglés y las transcripciones no; la rama léxica de la búsqueda híbrida no aporta nada con consultas en español (ya medido antes), mientras que la rama vectorial sí se entiende. El prompt le indica al modelo que formule las consultas en inglés.
 - **Herramientas secuenciales.** Aunque el modelo pida varias búsquedas en un turno, se ejecutan una tras otra: una `AsyncSession` no admite uso concurrente.
@@ -95,13 +95,13 @@ El resultado es útil precisamente porque no está completo. El corpus no contie
 
 ## 6. Pruebas
 
-55 tests nuevos (329 en total), todos sin red gracias a un cliente falso que reproduce respuestas guionadas y registra cada llamada:
+56 tests nuevos (330 en total), todos sin red gracias a un cliente falso que reproduce respuestas guionadas y registra cada llamada:
 
 - **Esquemas**: forma plana, `strict`, y cada objeto anidado con `required` igual a sus propiedades y `additionalProperties: false`.
 - **Herramientas**: mediana y contingencia, componente sin referencias, cada código de `validate_estimate`, tolerancia de redondeo, mapeo de chunks a ítems, uso de búsqueda híbrida con reranking, filtros por metadatos y el despachador con entradas inválidas.
 - **Bucle**: terminación natural, cada `function_call_output` con su `call_id`, encadenamiento con `previous_response_id`, ajustes de razonamiento y herramientas en la primera llamada, forma de la traza, total calculado en código y coherencia con el cálculo, suma de tokens, tope de iteraciones (con las llamadas pendientes contestadas), argumentos inválidos devueltos al modelo y salida estructurada no interpretable.
 - **HTTP**: respuesta con traza renderizada, valores por defecto y sobrescritura de modelo y esfuerzo, `422` ante peticiones inválidas, `502` ante fallos del agente o de OpenAI, `500` ante configuración ausente.
-- **Prompt**: nombra las tres herramientas, el presupuesto de turnos y las reglas de consultas en inglés y de no inventar horas.
+- **Prompt**: nombra las tres herramientas, el presupuesto de turnos, las reglas de consultas en inglés y de no inventar horas, y conserva las secciones de rol, objetivo, contexto, herramientas, método, restricciones y formato de salida.
 
 Además se verificó el endpoint contra el servicio real en Docker (`gpt-5-mini`, transcripción simple: 6 iteraciones, 3 búsquedas, total coherente) y que una transcripción demasiado corta devuelve `422`.
 
