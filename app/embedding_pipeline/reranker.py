@@ -56,7 +56,7 @@ class CrossEncoderReranker:
                 return self._model
             # Import diferido a propósito: mantiene el costo de importar
             # este módulo (tests, arranque de la app) libre de torch hasta
-            # que alguien de verdad rerankea algo.
+            # el primer uso del reranker.
             from sentence_transformers import CrossEncoder
 
             started = time.perf_counter()

@@ -1,0 +1,445 @@
+{
+  "date": "2026-11-15",
+  "runs_per_query": 3,
+  "generator_model": "gpt-4o-mini",
+  "judge_model": "gpt-4o",
+  "embedding_model": "text-embedding-3-small",
+  "retrieval": {
+    "k": 5,
+    "search_mode": "hybrid",
+    "rerank": false
+  },
+  "rows": [
+    {
+      "id": "Q1",
+      "question": "Online payment processing for checkout and order management",
+      "ground_truth": "Checkout and order handling are covered by the cart and checkout service of the historical project \"Headless e-commerce storefront with personalized recommendations\", recorded at 140 hours. The catalog API, personalized recommendations and storefront PWA of that budget are not part of this request. Reference estimate: about 140 hours in total. There is no historical data for a standalone payment-provider integration.",
+      "runs": [
+        {
+          "request_id": "ce63b1dc2f074321afe7f20d0a3fdc41",
+          "answer": "The retrieved context provides relevant components for online payment processing, particularly focusing on payment gateway and order management aspects. However, there are gaps in specific order management functionalities.\n- Payment gateway core: 220 hours. The payment gateway core is essential for processing payments, and its estimated hours are directly supported by the historical data.\n- Cart and checkout service: 140 hours. The cart and checkout service is crucial for order management, and its estimated hours are supported by historical data from a similar project.\n- Order management: 0 hours. Insufficient data: There is no specific historical data on order management functionalities directly related to the new project requirements.\n- Vendor onboarding and KYC: 0 hours. Insufficient data: While vendor onboarding is relevant, there is no direct support for this component in the context of online payment processing for checkout and order management.\n- Merchant dashboard: 60 hours. The merchant dashboard is relevant for transaction management, and its estimated hours are supported by historical data.",
+          "contexts": [
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Payment gateway core\nDescription: High-throughput payment authorization and capture service with idempotency keys, retry semantics and pluggable acquirer adapters.\nTech stack: java_spring, kafka, postgresql\nComplexity: high\nEstimated hours: 220",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60",
+            "[Project: Headless e-commerce storefront with personalized recommendations]\n[Client sector: ecommerce | Year: 2024 | Main tech: node]\n\nComponent: Cart and checkout service\nDescription: Stateless cart service with promotion engine, tax calculation and a checkout orchestration that integrates the payment provider.\nTech stack: node, redis, postgresql\nComplexity: high\nEstimated hours: 140",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Split order management\nDescription: Order splitting across vendors, per-vendor fulfillment state machines and customer-facing consolidated order tracking.\nTech stack: ruby_on_rails, sidekiq, postgresql\nComplexity: high\nEstimated hours: 170",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor onboarding and KYC\nDescription: Vendor self-service onboarding with identity verification, payout account setup and a manual review queue.\nTech stack: ruby_on_rails, postgresql\nComplexity: medium\nEstimated hours: 130"
+          ],
+          "citation_counts": {
+            "grounded": 3,
+            "dangling_citation": 0,
+            "insufficient_data": 2
+          },
+          "scores": {
+            "faithfulness": 0.5294117647058824,
+            "answer_relevancy": 0.6435362483289806,
+            "context_precision": 0.3333333333,
+            "context_recall": 1.0
+          }
+        },
+        {
+          "request_id": "5515b6ca717a4fc59aac9e62763d3806",
+          "answer": "The retrieved context provides relevant components for online payment processing, particularly focusing on payment gateway and order management aspects. However, there are gaps in specific order management functionalities.\n- Payment gateway core: 220 hours. The payment gateway core is essential for processing payments, and the estimated hours are directly supported by the historical data.\n- Merchant dashboard: 60 hours. The merchant dashboard is relevant for order management and transaction tracking, with hours supported by historical data.\n- Cart and checkout service: 140 hours. The cart and checkout service is crucial for the checkout process, with hours supported by historical data from a similar project.\n- Split order management: 170 hours. Order management is a key aspect of the project, and the estimated hours are supported by historical data from a similar project.\n- Vendor onboarding and KYC: 130 hours. While not directly related to payment processing, vendor onboarding is relevant for managing payment accounts, with hours supported by historical data.",
+          "contexts": [
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Payment gateway core\nDescription: High-throughput payment authorization and capture service with idempotency keys, retry semantics and pluggable acquirer adapters.\nTech stack: java_spring, kafka, postgresql\nComplexity: high\nEstimated hours: 220",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60",
+            "[Project: Headless e-commerce storefront with personalized recommendations]\n[Client sector: ecommerce | Year: 2024 | Main tech: node]\n\nComponent: Cart and checkout service\nDescription: Stateless cart service with promotion engine, tax calculation and a checkout orchestration that integrates the payment provider.\nTech stack: node, redis, postgresql\nComplexity: high\nEstimated hours: 140",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Split order management\nDescription: Order splitting across vendors, per-vendor fulfillment state machines and customer-facing consolidated order tracking.\nTech stack: ruby_on_rails, sidekiq, postgresql\nComplexity: high\nEstimated hours: 170",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor onboarding and KYC\nDescription: Vendor self-service onboarding with identity verification, payout account setup and a manual review queue.\nTech stack: ruby_on_rails, postgresql\nComplexity: medium\nEstimated hours: 130"
+          ],
+          "citation_counts": {
+            "grounded": 5,
+            "dangling_citation": 0,
+            "insufficient_data": 0
+          },
+          "scores": {
+            "faithfulness": 0.6842105263157895,
+            "answer_relevancy": 0.6780098164393208,
+            "context_precision": 0.3333333333,
+            "context_recall": 0.75
+          }
+        },
+        {
+          "request_id": "be4ed4dabbf647248e045c1c96589e41",
+          "answer": "The retrieved context provides relevant data for the payment processing components, but lacks specific support for order management features. The estimate includes grounded components for payment processing and a grounded component for order management, while other components are not supported.\n- Payment gateway core: 220 hours. The payment gateway core is essential for processing payments and is directly supported by historical data.\n- Merchant dashboard: 60 hours. The merchant dashboard is relevant for transaction management and is supported by historical data.\n- Cart and checkout service: 140 hours. The cart and checkout service is necessary for order management and is supported by historical data.\n- Split order management: 0 hours. Insufficient data: There are no chunks that specifically support the split order management component for the online payment processing project.\n- Vendor onboarding and KYC: 0 hours. Insufficient data: There are no chunks that specifically support the vendor onboarding and KYC component for the online payment processing project.",
+          "contexts": [
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Payment gateway core\nDescription: High-throughput payment authorization and capture service with idempotency keys, retry semantics and pluggable acquirer adapters.\nTech stack: java_spring, kafka, postgresql\nComplexity: high\nEstimated hours: 220",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60",
+            "[Project: Headless e-commerce storefront with personalized recommendations]\n[Client sector: ecommerce | Year: 2024 | Main tech: node]\n\nComponent: Cart and checkout service\nDescription: Stateless cart service with promotion engine, tax calculation and a checkout orchestration that integrates the payment provider.\nTech stack: node, redis, postgresql\nComplexity: high\nEstimated hours: 140",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Split order management\nDescription: Order splitting across vendors, per-vendor fulfillment state machines and customer-facing consolidated order tracking.\nTech stack: ruby_on_rails, sidekiq, postgresql\nComplexity: high\nEstimated hours: 170",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor onboarding and KYC\nDescription: Vendor self-service onboarding with identity verification, payout account setup and a manual review queue.\nTech stack: ruby_on_rails, postgresql\nComplexity: medium\nEstimated hours: 130"
+          ],
+          "citation_counts": {
+            "grounded": 3,
+            "dangling_citation": 0,
+            "insufficient_data": 2
+          },
+          "scores": {
+            "faithfulness": 0.45,
+            "answer_relevancy": 0.5357738498899208,
+            "context_precision": 0.3333333333,
+            "context_recall": 1.0
+          }
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.5545407636738906,
+        "answer_relevancy": 0.6191066382194074,
+        "context_precision": 0.3333333333,
+        "context_recall": 0.9166666666666666
+      },
+      "spread": {
+        "faithfulness": 0.23421052631578948,
+        "answer_relevancy": 0.14223596654939996,
+        "context_precision": 0.0,
+        "context_recall": 0.25
+      }
+    },
+    {
+      "id": "Q2",
+      "question": "Real-time payment gateway with fraud detection and settlement reconciliation with the acquirer",
+      "ground_truth": "All three requested modules exist in the historical project \"Real-time payments gateway with fraud detection and reconciliation\": payment gateway core, 220 hours; real-time fraud detection, 200 hours; settlement reconciliation, 120 hours. The merchant dashboard of that budget is not requested. Reference estimate: 540 hours in total.",
+      "runs": [
+        {
+          "request_id": "f981732ecb7449d8b18e4acbe402cc76",
+          "answer": "The retrieved context provides sufficient coverage for the components of a real-time payment gateway with fraud detection and settlement reconciliation, with detailed estimates for each relevant component.\n- Settlement reconciliation: 120 hours. The project requires daily settlement file ingestion and reconciliation, similar to the historical project.\n- Payment gateway core: 220 hours. The core payment gateway functionality is essential for the project, matching the historical estimate.\n- Real-time fraud detection: 200 hours. Real-time fraud detection is a critical component, and the estimate aligns with the historical data.\n- Merchant dashboard: 60 hours. A merchant dashboard is necessary for transaction management, consistent with the historical estimate.\n- Dispute and refund handling: 0 hours. Insufficient data: There are no historical estimates for dispute and refund handling in the context of a payment gateway.",
+          "contexts": [
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Settlement reconciliation\nDescription: Daily settlement file ingestion and three-way reconciliation between gateway, acquirer and ledger with exception queues.\nTech stack: java_spring, postgresql\nComplexity: medium\nEstimated hours: 120",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Payment gateway core\nDescription: High-throughput payment authorization and capture service with idempotency keys, retry semantics and pluggable acquirer adapters.\nTech stack: java_spring, kafka, postgresql\nComplexity: high\nEstimated hours: 220",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Real-time fraud detection\nDescription: Streaming fraud scoring on the authorization path using velocity rules and a gradient-boosted model served with sub-50ms latency.\nTech stack: java_spring, kafka, redis\nComplexity: high\nEstimated hours: 200",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Dispute and refund handling\nDescription: Buyer-seller dispute workflow with evidence upload, SLA timers and partial refund support.\nTech stack: ruby_on_rails\nComplexity: medium\nEstimated hours: 100"
+          ],
+          "citation_counts": {
+            "grounded": 4,
+            "dangling_citation": 0,
+            "insufficient_data": 1
+          },
+          "scores": {
+            "faithfulness": 0.6875,
+            "answer_relevancy": 0.6986673277400639,
+            "context_precision": 0.9999999999666667,
+            "context_recall": 0.6666666666666666
+          }
+        },
+        {
+          "request_id": "def14484e7ed4559a56c4092a4f34e55",
+          "answer": "The retrieved context provides sufficient historical data for estimating the components of a real-time payment gateway project, including fraud detection and settlement reconciliation. However, there is no direct support for the overall project structure beyond the specified components.\n- Settlement reconciliation: 120 hours. The project requires daily settlement file ingestion and reconciliation, which aligns with the historical data.\n- Payment gateway core: 220 hours. The core payment gateway functionality is essential for the project, supported by historical data.\n- Real-time fraud detection: 200 hours. Fraud detection is a critical component of the project, directly supported by historical data.\n- Merchant dashboard: 60 hours. A merchant dashboard is necessary for transaction management, supported by historical data.\n- Overall project structure: 0 hours. Insufficient data: There is no historical evidence for the overall project structure or additional components that may be required for integration and deployment.",
+          "contexts": [
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Settlement reconciliation\nDescription: Daily settlement file ingestion and three-way reconciliation between gateway, acquirer and ledger with exception queues.\nTech stack: java_spring, postgresql\nComplexity: medium\nEstimated hours: 120",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Payment gateway core\nDescription: High-throughput payment authorization and capture service with idempotency keys, retry semantics and pluggable acquirer adapters.\nTech stack: java_spring, kafka, postgresql\nComplexity: high\nEstimated hours: 220",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Real-time fraud detection\nDescription: Streaming fraud scoring on the authorization path using velocity rules and a gradient-boosted model served with sub-50ms latency.\nTech stack: java_spring, kafka, redis\nComplexity: high\nEstimated hours: 200",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Dispute and refund handling\nDescription: Buyer-seller dispute workflow with evidence upload, SLA timers and partial refund support.\nTech stack: ruby_on_rails\nComplexity: medium\nEstimated hours: 100"
+          ],
+          "citation_counts": {
+            "grounded": 4,
+            "dangling_citation": 0,
+            "insufficient_data": 1
+          },
+          "scores": {
+            "faithfulness": 0.6842105263157895,
+            "answer_relevancy": 0.5173185098557828,
+            "context_precision": 0.3333333333,
+            "context_recall": 0.6666666666666666
+          }
+        },
+        {
+          "request_id": "23e75d88419544ce89b3e9143c685669",
+          "answer": "The retrieved context provides sufficient data for estimating the components of a real-time payment gateway project, including fraud detection and settlement reconciliation. However, there is no direct support for the overall project structure beyond the individual components.\n- Settlement reconciliation: 120 hours. The project requires daily settlement file ingestion and reconciliation, which aligns with the historical data.\n- Payment gateway core: 220 hours. The core payment gateway functionality is essential for the project, matching the historical estimate.\n- Real-time fraud detection: 200 hours. Fraud detection is a critical component of the project, supported by historical data.\n- Merchant dashboard: 60 hours. A dashboard for merchants is necessary for transaction management, as indicated in the historical data.\n- Settlement reconciliation with the acquirer: 0 hours. Insufficient data: There is no specific historical data on the reconciliation process with the acquirer, which is a distinct requirement from the general settlement reconciliation.\n- Fraud detection integration: 0 hours. Insufficient data: There is no historical evidence for the integration of fraud detection specifically within the payment gateway context, which may differ from standalone implementations.\n- Overall project management: 0 hours. Insufficient data: There is no historical data regarding project management hours for this type of project, which is typically necessary for successful delivery.",
+          "contexts": [
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Settlement reconciliation\nDescription: Daily settlement file ingestion and three-way reconciliation between gateway, acquirer and ledger with exception queues.\nTech stack: java_spring, postgresql\nComplexity: medium\nEstimated hours: 120",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Payment gateway core\nDescription: High-throughput payment authorization and capture service with idempotency keys, retry semantics and pluggable acquirer adapters.\nTech stack: java_spring, kafka, postgresql\nComplexity: high\nEstimated hours: 220",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Real-time fraud detection\nDescription: Streaming fraud scoring on the authorization path using velocity rules and a gradient-boosted model served with sub-50ms latency.\nTech stack: java_spring, kafka, redis\nComplexity: high\nEstimated hours: 200",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Dispute and refund handling\nDescription: Buyer-seller dispute workflow with evidence upload, SLA timers and partial refund support.\nTech stack: ruby_on_rails\nComplexity: medium\nEstimated hours: 100"
+          ],
+          "citation_counts": {
+            "grounded": 4,
+            "dangling_citation": 0,
+            "insufficient_data": 3
+          },
+          "scores": {
+            "faithfulness": 0.5925925925925926,
+            "answer_relevancy": 0.5173520406817839,
+            "context_precision": 0.9999999999666667,
+            "context_recall": 0.6666666666666666
+          }
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.654767706302794,
+        "answer_relevancy": 0.5777792927592101,
+        "context_precision": 0.7777777777444445,
+        "context_recall": 0.6666666666666666
+      },
+      "spread": {
+        "faithfulness": 0.09490740740740744,
+        "answer_relevancy": 0.18134881788428114,
+        "context_precision": 0.6666666666666667,
+        "context_recall": 0.0
+      }
+    },
+    {
+      "id": "Q3",
+      "question": "Remote patient monitoring platform ingesting wearable device data with alerts",
+      "ground_truth": "The historical project \"Remote patient monitoring with wearable data ingestion and alerts\" covers both requested modules: wearable data ingestion, 180 hours; clinical alerting engine, 150 hours. The care team dashboard of that budget is not requested. Reference estimate: 330 hours in total.",
+      "runs": [
+        {
+          "request_id": "774ccfe54b0a4b26811826604a71d6b3",
+          "answer": "The retrieved context provides sufficient historical data to estimate the components of the remote patient monitoring platform, specifically for wearable data ingestion and clinical alerting. However, there is no direct support for a care team dashboard, which is included in the project request.\n- Wearable data ingestion: 180 hours. The component is directly supported by historical data.\n- Clinical alerting engine: 150 hours. The component is directly supported by historical data.\n- Care team dashboard: 0 hours. Insufficient data: There are no chunks that provide estimates or details for a care team dashboard component.",
+          "contexts": [
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Wearable data ingestion\nDescription: High-volume ingestion pipeline for heart-rate, SpO2 and activity streams from wearables, with deduplication and schema validation.\nTech stack: node, kafka, timescaledb\nComplexity: high\nEstimated hours: 180",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Clinical alerting engine\nDescription: Threshold and trend-based alerting that escalates abnormal vitals to care teams with configurable rules per condition.\nTech stack: node, redis\nComplexity: high\nEstimated hours: 150",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Care team dashboard\nDescription: Dashboard for clinicians to triage alerts, view patient trends and acknowledge interventions.\nTech stack: react, node\nComplexity: medium\nEstimated hours: 150",
+            "[Project: Energy grid monitoring and demand-response platform]\n[Client sector: industrial | Year: 2024 | Main tech: java_spring]\n\nComponent: Smart meter data pipeline\nDescription: Ingestion and validation of smart-meter interval data at scale, with gap filling and unit normalization.\nTech stack: java_spring, kafka, cassandra\nComplexity: high\nEstimated hours: 200",
+            "[Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance]\n[Client sector: finance | Year: 2024 | Main tech: ruby_on_rails]\n\nComponent: Push and email notifications\nDescription: Event-driven notifications for transaction alerts and security events delivered via APNs/FCM and transactional email.\nTech stack: ruby_on_rails, redis\nComplexity: low\nEstimated hours: 60"
+          ],
+          "citation_counts": {
+            "grounded": 2,
+            "dangling_citation": 0,
+            "insufficient_data": 1
+          },
+          "scores": {
+            "faithfulness": 0.6363636363636364,
+            "answer_relevancy": 0.5539753307994992,
+            "context_precision": 0.0,
+            "context_recall": 0.6666666666666666
+          }
+        },
+        {
+          "request_id": "c28ea0a1a373457fb1fb6cb260c12f37",
+          "answer": "The retrieved context provides comprehensive coverage for the components of the remote patient monitoring platform, with direct support for wearable data ingestion, clinical alerting, and a care team dashboard.\n- Wearable data ingestion: 180 hours. The component is directly supported by the historical data for high-volume ingestion of wearable device data.\n- Clinical alerting engine: 150 hours. The component is directly supported by the historical data for threshold and trend-based alerting.\n- Care team dashboard: 150 hours. The component is directly supported by the historical data for a dashboard to triage alerts and view patient trends.",
+          "contexts": [
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Wearable data ingestion\nDescription: High-volume ingestion pipeline for heart-rate, SpO2 and activity streams from wearables, with deduplication and schema validation.\nTech stack: node, kafka, timescaledb\nComplexity: high\nEstimated hours: 180",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Clinical alerting engine\nDescription: Threshold and trend-based alerting that escalates abnormal vitals to care teams with configurable rules per condition.\nTech stack: node, redis\nComplexity: high\nEstimated hours: 150",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Care team dashboard\nDescription: Dashboard for clinicians to triage alerts, view patient trends and acknowledge interventions.\nTech stack: react, node\nComplexity: medium\nEstimated hours: 150",
+            "[Project: Energy grid monitoring and demand-response platform]\n[Client sector: industrial | Year: 2024 | Main tech: java_spring]\n\nComponent: Smart meter data pipeline\nDescription: Ingestion and validation of smart-meter interval data at scale, with gap filling and unit normalization.\nTech stack: java_spring, kafka, cassandra\nComplexity: high\nEstimated hours: 200",
+            "[Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance]\n[Client sector: finance | Year: 2024 | Main tech: ruby_on_rails]\n\nComponent: Push and email notifications\nDescription: Event-driven notifications for transaction alerts and security events delivered via APNs/FCM and transactional email.\nTech stack: ruby_on_rails, redis\nComplexity: low\nEstimated hours: 60"
+          ],
+          "citation_counts": {
+            "grounded": 3,
+            "dangling_citation": 0,
+            "insufficient_data": 0
+          },
+          "scores": {
+            "faithfulness": 1.0,
+            "answer_relevancy": 0.5865422138204929,
+            "context_precision": 0.0,
+            "context_recall": 0.6666666666666666
+          }
+        },
+        {
+          "request_id": "ed0f00ee429e4c808d880ee74ed4a50d",
+          "answer": "The retrieved context provides comprehensive coverage for the components of the remote patient monitoring platform, with direct support for wearable data ingestion, clinical alerting, and a care team dashboard.\n- Wearable data ingestion: 180 hours. The component is directly supported by historical data for a similar project.\n- Clinical alerting engine: 150 hours. The component is directly supported by historical data for a similar project.\n- Care team dashboard: 150 hours. The component is directly supported by historical data for a similar project.",
+          "contexts": [
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Wearable data ingestion\nDescription: High-volume ingestion pipeline for heart-rate, SpO2 and activity streams from wearables, with deduplication and schema validation.\nTech stack: node, kafka, timescaledb\nComplexity: high\nEstimated hours: 180",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Clinical alerting engine\nDescription: Threshold and trend-based alerting that escalates abnormal vitals to care teams with configurable rules per condition.\nTech stack: node, redis\nComplexity: high\nEstimated hours: 150",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Care team dashboard\nDescription: Dashboard for clinicians to triage alerts, view patient trends and acknowledge interventions.\nTech stack: react, node\nComplexity: medium\nEstimated hours: 150",
+            "[Project: Energy grid monitoring and demand-response platform]\n[Client sector: industrial | Year: 2024 | Main tech: java_spring]\n\nComponent: Smart meter data pipeline\nDescription: Ingestion and validation of smart-meter interval data at scale, with gap filling and unit normalization.\nTech stack: java_spring, kafka, cassandra\nComplexity: high\nEstimated hours: 200",
+            "[Project: Mobile banking API with OAuth 2.0 authentication and PSD2 compliance]\n[Client sector: finance | Year: 2024 | Main tech: ruby_on_rails]\n\nComponent: Push and email notifications\nDescription: Event-driven notifications for transaction alerts and security events delivered via APNs/FCM and transactional email.\nTech stack: ruby_on_rails, redis\nComplexity: low\nEstimated hours: 60"
+          ],
+          "citation_counts": {
+            "grounded": 3,
+            "dangling_citation": 0,
+            "insufficient_data": 0
+          },
+          "scores": {
+            "faithfulness": 0.7,
+            "answer_relevancy": 0.5474472115198217,
+            "context_precision": 0.0,
+            "context_recall": 0.6666666666666666
+          }
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.7787878787878788,
+        "answer_relevancy": 0.5626549187132713,
+        "context_precision": 0.0,
+        "context_recall": 0.6666666666666666
+      },
+      "spread": {
+        "faithfulness": 0.36363636363636365,
+        "answer_relevancy": 0.0390950023006712,
+        "context_precision": 0.0,
+        "context_recall": 0.0
+      }
+    },
+    {
+      "id": "Q4",
+      "question": "Factory IoT telemetry platform for predictive maintenance",
+      "ground_truth": "The historical project \"Factory IoT telemetry and predictive maintenance system\" covers both requested modules: sensor telemetry ingestion, 170 hours; predictive maintenance models, 200 hours. The SCADA dashboard integration of that budget is not requested. Reference estimate: 370 hours in total.",
+      "runs": [
+        {
+          "request_id": "6f787e93073c4519810f23390ad6decd",
+          "answer": "The retrieved context provides relevant historical data for the components of a factory IoT telemetry platform focused on predictive maintenance, covering predictive maintenance models, sensor telemetry ingestion, and SCADA dashboard integration.\n- Predictive maintenance models: 200 hours. The project requires anomaly detection and remaining-useful-life models, similar to the historical project.\n- Sensor telemetry ingestion: 170 hours. The project involves MQTT-based ingestion of telemetry, which aligns with the historical project.\n- SCADA dashboard integration: 130 hours. The project requires integration with SCADA systems to overlay predictive alerts, similar to the historical project.",
+          "contexts": [
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: Predictive maintenance models\nDescription: Anomaly detection and remaining-useful-life models that flag machines at risk of failure and schedule maintenance windows.\nTech stack: python_fastapi, scikit_learn\nComplexity: high\nEstimated hours: 200",
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: Sensor telemetry ingestion\nDescription: MQTT-based ingestion of machine sensor telemetry into a time-series store, with edge buffering and out-of-order handling.\nTech stack: python_fastapi, mqtt, timescaledb\nComplexity: high\nEstimated hours: 170",
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: SCADA dashboard integration\nDescription: Read-only integration with the plant SCADA system to overlay predictive alerts on existing operator dashboards.\nTech stack: python_fastapi\nComplexity: medium\nEstimated hours: 130",
+            "[Project: Energy grid monitoring and demand-response platform]\n[Client sector: industrial | Year: 2024 | Main tech: java_spring]\n\nComponent: Smart meter data pipeline\nDescription: Ingestion and validation of smart-meter interval data at scale, with gap filling and unit normalization.\nTech stack: java_spring, kafka, cassandra\nComplexity: high\nEstimated hours: 200",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Clinical alerting engine\nDescription: Threshold and trend-based alerting that escalates abnormal vitals to care teams with configurable rules per condition.\nTech stack: node, redis\nComplexity: high\nEstimated hours: 150"
+          ],
+          "citation_counts": {
+            "grounded": 3,
+            "dangling_citation": 0,
+            "insufficient_data": 0
+          },
+          "scores": {
+            "faithfulness": 0.5,
+            "answer_relevancy": 0.8044090683338464,
+            "context_precision": 0.0,
+            "context_recall": 0.6666666666666666
+          }
+        },
+        {
+          "request_id": "2c38548d51c74b50810bdf8aa1af3f93",
+          "answer": "The retrieved context provides relevant components for the Factory IoT telemetry platform, specifically for predictive maintenance, with sufficient historical data to estimate hours for each component.\n- Predictive maintenance models: 200 hours. The project requires anomaly detection and remaining-useful-life models, similar to the historical project.\n- Sensor telemetry ingestion: 170 hours. The project involves MQTT-based ingestion of telemetry, matching the historical context.\n- SCADA dashboard integration: 130 hours. The project requires integration with SCADA systems, as outlined in the historical data.\n- Edge computing for data processing: 0 hours. Insufficient data: There are no historical chunks that provide estimates or details for edge computing components.\n- User interface for alerts: 0 hours. Insufficient data: There are no historical chunks that provide estimates or details for user interface components.",
+          "contexts": [
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: Predictive maintenance models\nDescription: Anomaly detection and remaining-useful-life models that flag machines at risk of failure and schedule maintenance windows.\nTech stack: python_fastapi, scikit_learn\nComplexity: high\nEstimated hours: 200",
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: Sensor telemetry ingestion\nDescription: MQTT-based ingestion of machine sensor telemetry into a time-series store, with edge buffering and out-of-order handling.\nTech stack: python_fastapi, mqtt, timescaledb\nComplexity: high\nEstimated hours: 170",
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: SCADA dashboard integration\nDescription: Read-only integration with the plant SCADA system to overlay predictive alerts on existing operator dashboards.\nTech stack: python_fastapi\nComplexity: medium\nEstimated hours: 130",
+            "[Project: Energy grid monitoring and demand-response platform]\n[Client sector: industrial | Year: 2024 | Main tech: java_spring]\n\nComponent: Smart meter data pipeline\nDescription: Ingestion and validation of smart-meter interval data at scale, with gap filling and unit normalization.\nTech stack: java_spring, kafka, cassandra\nComplexity: high\nEstimated hours: 200",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Clinical alerting engine\nDescription: Threshold and trend-based alerting that escalates abnormal vitals to care teams with configurable rules per condition.\nTech stack: node, redis\nComplexity: high\nEstimated hours: 150"
+          ],
+          "citation_counts": {
+            "grounded": 3,
+            "dangling_citation": 0,
+            "insufficient_data": 2
+          },
+          "scores": {
+            "faithfulness": 0.8666666666666667,
+            "answer_relevancy": 0.5947743137629162,
+            "context_precision": 0.0,
+            "context_recall": 0.6666666666666666
+          }
+        },
+        {
+          "request_id": "6083e20507414fcbb53ba3657c4b9202",
+          "answer": "The retrieved context provides relevant components for the Factory IoT telemetry platform, specifically for predictive maintenance, with sufficient historical data to estimate hours for each component.\n- Predictive maintenance models: 200 hours. The project requires anomaly detection and remaining-useful-life models, similar to the historical project.\n- Sensor telemetry ingestion: 170 hours. The project involves MQTT-based ingestion of telemetry, matching the historical context.\n- SCADA dashboard integration: 130 hours. The integration with SCADA systems is relevant to the project requirements.\n- Data analytics engine: 0 hours. Insufficient data: There are no historical chunks related to a data analytics engine for this project.\n- User interface for telemetry visualization: 0 hours. Insufficient data: There are no historical chunks related to a user interface for telemetry visualization in the provided context.",
+          "contexts": [
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: Predictive maintenance models\nDescription: Anomaly detection and remaining-useful-life models that flag machines at risk of failure and schedule maintenance windows.\nTech stack: python_fastapi, scikit_learn\nComplexity: high\nEstimated hours: 200",
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: Sensor telemetry ingestion\nDescription: MQTT-based ingestion of machine sensor telemetry into a time-series store, with edge buffering and out-of-order handling.\nTech stack: python_fastapi, mqtt, timescaledb\nComplexity: high\nEstimated hours: 170",
+            "[Project: Factory IoT telemetry and predictive maintenance system]\n[Client sector: industrial | Year: 2024 | Main tech: python_fastapi]\n\nComponent: SCADA dashboard integration\nDescription: Read-only integration with the plant SCADA system to overlay predictive alerts on existing operator dashboards.\nTech stack: python_fastapi\nComplexity: medium\nEstimated hours: 130",
+            "[Project: Energy grid monitoring and demand-response platform]\n[Client sector: industrial | Year: 2024 | Main tech: java_spring]\n\nComponent: Smart meter data pipeline\nDescription: Ingestion and validation of smart-meter interval data at scale, with gap filling and unit normalization.\nTech stack: java_spring, kafka, cassandra\nComplexity: high\nEstimated hours: 200",
+            "[Project: Remote patient monitoring with wearable data ingestion and alerts]\n[Client sector: healthcare | Year: 2024 | Main tech: node]\n\nComponent: Clinical alerting engine\nDescription: Threshold and trend-based alerting that escalates abnormal vitals to care teams with configurable rules per condition.\nTech stack: node, redis\nComplexity: high\nEstimated hours: 150"
+          ],
+          "citation_counts": {
+            "grounded": 3,
+            "dangling_citation": 0,
+            "insufficient_data": 2
+          },
+          "scores": {
+            "faithfulness": 0.6666666666666666,
+            "answer_relevancy": 0.5948180030368576,
+            "context_precision": 0.0,
+            "context_recall": 0.3333333333333333
+          }
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.6777777777777777,
+        "answer_relevancy": 0.6646671283778735,
+        "context_precision": 0.0,
+        "context_recall": 0.5555555555555555
+      },
+      "spread": {
+        "faithfulness": 0.3666666666666667,
+        "answer_relevancy": 0.20963475457093017,
+        "context_precision": 0.0,
+        "context_recall": 0.3333333333333333
+      }
+    },
+    {
+      "id": "Q5",
+      "question": "Multi-vendor marketplace with vendor payouts and buyer-seller dispute handling",
+      "ground_truth": "The historical project \"Multi-vendor marketplace with vendor payouts and dispute handling\" covers both requested modules: vendor payouts engine, 140 hours; dispute and refund handling, 100 hours. Vendor onboarding and split order management exist in the same budget but are not part of this request. Reference estimate: 240 hours in total.",
+      "runs": [
+        {
+          "request_id": "3003192e0b4f4248a95257993f98dc15",
+          "answer": "The retrieved context provides comprehensive coverage for the components of a multi-vendor marketplace, specifically addressing dispute handling, vendor payouts, onboarding, and order management. Each component is well-supported by historical budget evidence.\n- Dispute and refund handling: 100 hours. The component is directly supported by historical data.\n- Vendor payouts engine: 140 hours. The component is directly supported by historical data.\n- Vendor onboarding and KYC: 130 hours. The component is directly supported by historical data.\n- Split order management: 170 hours. The component is directly supported by historical data.",
+          "contexts": [
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Dispute and refund handling\nDescription: Buyer-seller dispute workflow with evidence upload, SLA timers and partial refund support.\nTech stack: ruby_on_rails\nComplexity: medium\nEstimated hours: 100",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor payouts engine\nDescription: Scheduled marketplace payouts with commission calculation, holdback for disputes and reconciliation against the payment processor.\nTech stack: ruby_on_rails, postgresql\nComplexity: high\nEstimated hours: 140",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor onboarding and KYC\nDescription: Vendor self-service onboarding with identity verification, payout account setup and a manual review queue.\nTech stack: ruby_on_rails, postgresql\nComplexity: medium\nEstimated hours: 130",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Split order management\nDescription: Order splitting across vendors, per-vendor fulfillment state machines and customer-facing consolidated order tracking.\nTech stack: ruby_on_rails, sidekiq, postgresql\nComplexity: high\nEstimated hours: 170",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60"
+          ],
+          "citation_counts": {
+            "grounded": 4,
+            "dangling_citation": 0,
+            "insufficient_data": 0
+          },
+          "scores": {
+            "faithfulness": 0.5454545454545454,
+            "answer_relevancy": 0.5178267555151669,
+            "context_precision": 0.0,
+            "context_recall": 0.3333333333333333
+          }
+        },
+        {
+          "request_id": "0861c85d829d47aeb452b9291edcf084",
+          "answer": "The retrieved context provides comprehensive coverage for the components of a multi-vendor marketplace, including dispute handling, vendor payouts, onboarding, and order management. Each component is supported by historical budget evidence.\n- Dispute and refund handling: 100 hours. The component is directly supported by historical data.\n- Vendor payouts engine: 140 hours. The component is directly supported by historical data.\n- Vendor onboarding and KYC: 130 hours. The component is directly supported by historical data.\n- Split order management: 170 hours. The component is directly supported by historical data.",
+          "contexts": [
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Dispute and refund handling\nDescription: Buyer-seller dispute workflow with evidence upload, SLA timers and partial refund support.\nTech stack: ruby_on_rails\nComplexity: medium\nEstimated hours: 100",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor payouts engine\nDescription: Scheduled marketplace payouts with commission calculation, holdback for disputes and reconciliation against the payment processor.\nTech stack: ruby_on_rails, postgresql\nComplexity: high\nEstimated hours: 140",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor onboarding and KYC\nDescription: Vendor self-service onboarding with identity verification, payout account setup and a manual review queue.\nTech stack: ruby_on_rails, postgresql\nComplexity: medium\nEstimated hours: 130",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Split order management\nDescription: Order splitting across vendors, per-vendor fulfillment state machines and customer-facing consolidated order tracking.\nTech stack: ruby_on_rails, sidekiq, postgresql\nComplexity: high\nEstimated hours: 170",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60"
+          ],
+          "citation_counts": {
+            "grounded": 4,
+            "dangling_citation": 0,
+            "insufficient_data": 0
+          },
+          "scores": {
+            "faithfulness": 0.5454545454545454,
+            "answer_relevancy": 0.5493558377767037,
+            "context_precision": 0.0,
+            "context_recall": 1.0
+          }
+        },
+        {
+          "request_id": "704fccfd2df54948923b4ee03274c6a2",
+          "answer": "The retrieved context provides comprehensive coverage for the components of a multi-vendor marketplace, specifically addressing dispute handling, vendor payouts, onboarding, and order management. Each relevant component is supported by historical budget evidence.\n- Dispute and refund handling: 100 hours. The component is directly supported by historical data.\n- Vendor payouts engine: 140 hours. The component is directly supported by historical data.\n- Vendor onboarding and KYC: 130 hours. The component is directly supported by historical data.\n- Split order management: 170 hours. The component is directly supported by historical data.",
+          "contexts": [
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Dispute and refund handling\nDescription: Buyer-seller dispute workflow with evidence upload, SLA timers and partial refund support.\nTech stack: ruby_on_rails\nComplexity: medium\nEstimated hours: 100",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor payouts engine\nDescription: Scheduled marketplace payouts with commission calculation, holdback for disputes and reconciliation against the payment processor.\nTech stack: ruby_on_rails, postgresql\nComplexity: high\nEstimated hours: 140",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Vendor onboarding and KYC\nDescription: Vendor self-service onboarding with identity verification, payout account setup and a manual review queue.\nTech stack: ruby_on_rails, postgresql\nComplexity: medium\nEstimated hours: 130",
+            "[Project: Multi-vendor marketplace with vendor payouts and dispute handling]\n[Client sector: ecommerce | Year: 2023 | Main tech: ruby_on_rails]\n\nComponent: Split order management\nDescription: Order splitting across vendors, per-vendor fulfillment state machines and customer-facing consolidated order tracking.\nTech stack: ruby_on_rails, sidekiq, postgresql\nComplexity: high\nEstimated hours: 170",
+            "[Project: Real-time payments gateway with fraud detection and reconciliation]\n[Client sector: finance | Year: 2023 | Main tech: java_spring]\n\nComponent: Merchant dashboard\nDescription: Merchant-facing dashboard for transaction search, refunds and payout tracking.\nTech stack: react, java_spring\nComplexity: low\nEstimated hours: 60"
+          ],
+          "citation_counts": {
+            "grounded": 4,
+            "dangling_citation": 0,
+            "insufficient_data": 0
+          },
+          "scores": {
+            "faithfulness": 0.5454545454545454,
+            "answer_relevancy": 0.5470002185099148,
+            "context_precision": 0.0,
+            "context_recall": 0.3333333333333333
+          }
+        }
+      ],
+      "scores": {
+        "faithfulness": 0.5454545454545454,
+        "answer_relevancy": 0.5380609372672618,
+        "context_precision": 0.0,
+        "context_recall": 0.5555555555555555
+      },
+      "spread": {
+        "faithfulness": 0.0,
+        "answer_relevancy": 0.031529082261536834,
+        "context_precision": 0.0,
+        "context_recall": 0.6666666666666667
+      }
+    }
+  ],
+  "average": {
+    "faithfulness": 0.6422657343993773,
+    "answer_relevancy": 0.5924537830674048,
+    "context_precision": 0.2222222222088889,
+    "context_recall": 0.6722222222222222
+  }
+}

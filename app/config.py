@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     max_conversation_turns: int = 6
     # Tope duro por adjunto extraído (en caracteres), para proteger la
     # ventana de contexto -- sin esto, un PDF enorme se manda entero al
-    # LLM. El chunking de verdad entra en el módulo 3; esto es un corte
-    # simple por ahora.
+    # LLM. Es un corte simple a propósito; partir el adjunto en fragmentos
+    # relevantes queda como mejora futura.
     max_attachment_chars: int = 60_000
 
     # --- Cache semántica (requiere redis/redis-stack, no redis:7-alpine) ---
@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     # alto aplana la curva (un documento necesita rankear bien en AMBAS
     # ramas para ganar), uno bajo deja que un solo primer puesto domine.
     rrf_k: int = 60
+
+    # --- Line-level grounded estimation ---
+    # Responses API is OpenAI-only, so this does not follow `llm_provider`.
+    grounded_generation_model: str = "gpt-4o-mini"
+    # Judge for the RAGAS evaluation; a different (stronger) model than the
+    # generator so the pipeline is not grading its own work.
+    ragas_judge_model: str = "gpt-4o"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -14,49 +14,29 @@ tendría overlap léxico con él -- la rama híbrida no tendría nada que
 demostrar.
 """
 
+import json
 import os
 import time
+from pathlib import Path
 
 import httpx
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
-# Cada entrada: la consulta y el conjunto de budget_id realmente
-# relevantes para ella, anotados a mano contra los 15 presupuestos del
-# corpus (ver data/budgets_sample.json).
+# Las consultas y los budget_id relevantes (anotados a mano contra los 15
+# presupuestos de data/budgets_sample.json) viven en evals/golden_set.json,
+# la misma fuente que usa la evaluación de generación.
 #
 # Las dos primeras son deliberadamente ambiguas en el vocabulario de
 # "pagos" (el caso real que justifica la búsqueda híbrida y el reranking:
 # un presupuesto puede estar cerca en el espacio vectorial y no ser el
 # proyecto correcto). Las otras tres son casos limpios de un solo sector,
 # para contrastar.
+GOLDEN_SET_PATH = Path(__file__).resolve().parent.parent / "evals" / "golden_set.json"
+
 GOLDEN_SET = [
-    {
-        # Describe una tienda online con checkout -- el proyecto
-        # correcto es el storefront de e-commerce, NO el gateway de
-        # pagos de finance, aunque ambos mencionen "payment"/"checkout".
-        "query": "Online payment processing for checkout and order management",
-        "relevant_budget_ids": {"BUD-2024-005"},
-    },
-    {
-        # Simétrico al anterior: acá sí es, de verdad, un proyecto de
-        # pagos de finance -- mismo vocabulario de superficie, dominio
-        # correcto distinto.
-        "query": "Real-time payment gateway with fraud detection and settlement reconciliation with the acquirer",
-        "relevant_budget_ids": {"BUD-2024-003"},
-    },
-    {
-        "query": "Remote patient monitoring platform ingesting wearable device data with alerts",
-        "relevant_budget_ids": {"BUD-2024-010"},
-    },
-    {
-        "query": "Factory IoT telemetry platform for predictive maintenance",
-        "relevant_budget_ids": {"BUD-2024-013"},
-    },
-    {
-        "query": "Multi-vendor marketplace with vendor payouts and buyer-seller dispute handling",
-        "relevant_budget_ids": {"BUD-2024-006"},
-    },
+    {"query": case["query"], "relevant_budget_ids": set(case["relevant_budget_ids"])}
+    for case in json.loads(GOLDEN_SET_PATH.read_text())["queries"]
 ]
 
 CONFIGURATIONS = [

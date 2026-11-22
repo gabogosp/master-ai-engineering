@@ -229,7 +229,7 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 
 ## Interfaz Web (Streamlit)
 
-`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python). Tiene dos pestañas, las dos bloqueantes (ver nota sobre streaming más arriba):
+`streamlit_app.py` es un **cliente HTTP** del servicio IA (no importa su código Python). Tiene tres pestañas, todas bloqueantes (ver nota sobre streaming más arriba):
 
 **⚡ Estimación rápida**:
 - Formulario tipado: descripción + `project_type`/`detail_level`/`output_format`/`prompt_version`, y una sección opcional para proyectos de referencia.
@@ -242,6 +242,11 @@ Agregar una versión nueva (`v3/`) no requiere tocar el resto del código: el lo
 - `POST /sessions/{id}/estimate` con un `st.spinner`; cada turno del asistente se guarda y se re-renderiza igual que en "Estimación rápida" (summary + fases + totales).
 - Panel expandible con el `project_metadata` actual y cuántos turnos hay en la ventana deslizante — útil para ver en vivo la separación entre memoria y historial.
 - Botón "Nueva conversación" que crea una sesión nueva y resetea el estado local.
+
+**🔎 Estimación con fuentes**:
+- Formulario: descripción del proyecto, tipo de búsqueda (híbrida o solo vectorial), cantidad de fragmentos a recuperar (`k`) y reranking opcional.
+- `POST /estimate/grounded` (ruta de primer nivel, no cuelga de `/api/v1`); ver la sección "Estimación con fuentes verificables".
+- El resultado muestra el resumen, las horas verificadas, cuántas líneas están fundamentadas, tienen una cita inválida o no tienen datos suficientes, y una tabla con un componente por fila. Cada componente se abre para ver su evidencia citada junto al texto real del fragmento histórico. Una cita a un fragmento que no existe en lo recuperado se muestra como error.
 
 ## Conversación multi-turno con memoria
 
@@ -279,7 +284,7 @@ La respuesta es el mismo `EstimationResponse` del endpoint de formulario, con do
 
 Se eligió **extracción local** (`pypdf` para PDF, `python-docx` para Word) en vez de subir el archivo directo a la Files API de un proveedor (Camino A). Razón: el wrapper de LLM (`llm_service.py`) es agnóstico de proveedor — el Router de LiteLLM hace fallback automático entre OpenAI y Anthropic. Atar un adjunto a la Files API de un proveedor específico rompería esa propiedad justo para las peticiones con adjuntos. Extraer el texto localmente (`app/attachments.py`) mantiene el fallback intacto en todos los casos. El texto de cada adjunto se concatena al transcript con un separador `--- attachment: <filename> ---`, y el guardrail de input corre sobre el transcript YA CON los adjuntos concatenados — un PDF también puede traer PII o un intento de prompt-injection.
 
-**Tope duro por adjunto** (`MAX_ATTACHMENT_CHARS`, 60.000 caracteres por defecto): protege la ventana de contexto de un PDF enorme. Si el texto extraído lo supera, se corta (`text[:max_chars]`) y queda un log `attachment_truncated` con el tamaño original y el que quedó. Es un corte simple a propósito — el chunking de verdad (partir el adjunto en pedazos relevantes en vez de cortar a lo bruto) entra con RAG en el módulo 3.
+**Tope duro por adjunto** (`MAX_ATTACHMENT_CHARS`, 60.000 caracteres por defecto): protege la ventana de contexto de un PDF enorme. Si el texto extraído lo supera, se corta (`text[:max_chars]`) y queda un log `attachment_truncated` con el tamaño original y el que quedó. Es un corte simple a propósito; partir el adjunto en fragmentos relevantes en lugar de truncarlo queda como mejora futura.
 
 ### Decisión: extracción de `project_metadata` — LLM extractor
 
@@ -447,6 +452,23 @@ El pipeline de embeddings persiste cada presupuesto ingestado en Postgres (`pgve
 **Sin índice vectorial todavía, a propósito.** Con el volumen actual (15 documentos, unas decenas de chunks), un sequential scan completo responde en cientos de milisegundos -- aceptable, y además es la referencia contra la que se mide el impacto real de cualquier índice (HNSW, IVFFlat) antes de adoptarlo. Optimizar antes de tener ese baseline sería medir a ciegas.
 
 Dos decisiones menores, de la misma migración: `embedding` es nullable (separa "persistir el chunk" de "calcular su vector" -- hoy se insertan juntos en la misma transacción, pero el esquema no cierra la puerta a una ingesta diferida más adelante), y `vector(1536)` tiene la dimensión fija al modelo de embeddings en uso -- cambiar de modelo implica reembeber todo el corpus, no es un parámetro que se ajuste en caliente.
+
+## Estimación con fuentes verificables
+
+`POST /estimate/grounded` estima un proyecto nuevo a partir de presupuestos históricos y hace que **cada línea** (cada componente) cite el fragmento concreto del que se derivó. Un verificador comprueba por código que cada fragmento citado exista realmente entre los que se le entregaron al modelo.
+
+```bash
+curl -X POST localhost:8000/estimate/grounded -H "Content-Type: application/json" \
+  -d '{"query": "Real-time payment gateway with fraud detection", "k": 5}'
+```
+
+Cuerpo de la petición: `query` (obligatorio), `k` (default 5), `search_mode` (`hybrid` por defecto, o `vector`) y `rerank` (default `false`).
+
+La respuesta trae `estimate` (resumen y líneas con `hours`, `rationale`, `grounded` y `sources` con `chunk_id`, `document_id` y `evidence` textual), `citation_report` (por línea: fundamentada, cita colgante o sin datos suficientes), `claimed_hours` frente a `verified_hours`, `retrieved_chunks` (el contexto exacto que recibió el modelo) y un `request_id` que correlaciona todos los logs de la petición.
+
+Reglas que se cumplen siempre: una línea fundamentada tiene al menos una fuente; una línea sin soporte tiene 0 horas y su `rationale` empieza con `Insufficient data:`; el total nunca lo calcula el modelo. Si una cita apunta a un fragmento que no estaba en el contexto, el servicio le pide una corrección (un reintento) y deja el hallazgo visible en el informe y en los logs.
+
+El diseño, el informe de verificación y la línea base de calidad (RAGAS) están en `calidad-generacion-ragas.md`.
 
 ## Estructura
 
