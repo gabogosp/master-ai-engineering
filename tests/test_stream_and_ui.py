@@ -84,10 +84,10 @@ def test_streamlit_initial_render():
 
         assert not at.exception
         assert at.title[0].value == "📋 Estimador de Proyectos"
-        # estimación rápida + estimación con fuentes + agente
+        # quick estimate + grounded estimate + agent
         assert len(at.text_area) == 3
-        # tipo, detalle, formato, versión de prompt + tipo de búsqueda (con fuentes)
-        # + ejemplo, modelo y esfuerzo (agente)
+        # type, detail, format, prompt version + search mode (grounded)
+        # + sample, model and effort (agent)
         assert len(at.selectbox) == 8
         assert len(at.sidebar) > 0
         assert at.session_state["session_id"] == FAKE_SESSION_ID
@@ -415,7 +415,7 @@ def test_the_result_stays_visible_after_the_page_reruns():
     assert {m.label: m.value for m in at.metric}["Horas verificadas"] == "220"
 
 
-# --- Pestaña del agente de estimación ---------------------------------------
+# --- Estimation agent tab ---------------------------------------------------
 
 AGENT_BUTTON = "Ejecutar el agente"
 AGENT_TRANSCRIPT = "Reunión de descubrimiento. " + "Necesitamos una plataforma con varias piezas. " * 4

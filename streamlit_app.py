@@ -254,8 +254,8 @@ AGENT_SAMPLES = {
 
 
 def load_agent_sample() -> None:
-    """Callback del selector de ejemplos: copia la transcripción elegida al
-    cuadro de texto. Si el archivo no está disponible, deja el texto como está."""
+    """Callback of the sample selector: copies the chosen transcript into the
+    text box. If the file is unavailable, the text is left as it is."""
     filename = AGENT_SAMPLES.get(st.session_state.get("agent_sample"))
     if filename is None:
         return
@@ -266,9 +266,8 @@ def load_agent_sample() -> None:
 
 
 def call_agent_estimate(payload: dict) -> dict:
-    """POST bloqueante a /estimate/agent (ruta de primer nivel). El agente
-    encadena varias llamadas al modelo, así que el timeout es mucho mayor que
-    el de las demás pestañas."""
+    """Blocking POST to /estimate/agent (a top-level route). The agent chains
+    several model calls, so the timeout is much longer than in the other tabs."""
     url = f"{settings.backend_url}/estimate/agent"
     try:
         with httpx.Client(timeout=httpx.Timeout(AGENT_TIMEOUT_SECONDS)) as client:
@@ -286,9 +285,9 @@ def call_agent_estimate(payload: dict) -> dict:
 
 
 def render_agent_result(body: dict) -> None:
-    """Muestra la estimación del agente: totales, horas por componente con sus
-    referencias, supuestos y la traza paso a paso (razonamiento, acción y
-    observación de cada decisión)."""
+    """Shows the agent's estimate: totals, hours per component with their
+    references, assumptions and the step-by-step trace (reasoning, action and
+    observation of each decision)."""
     result = body["result"]
     estimate = result["estimate"]
     components = estimate["components"]
@@ -616,7 +615,7 @@ with tab_grounded:
         render_grounded_result(outcome["body"])
 
 
-# --- Pestaña 4: agente de estimación (bucle manual con herramientas) ---
+# --- Tab 4: estimation agent (manual tool-calling loop) ---
 with tab_agent:
     st.caption(
         "Pega la transcripción de una reunión. El agente decide por sí mismo cuántas "
@@ -672,8 +671,8 @@ with tab_agent:
             except RuntimeError as exc:
                 st.session_state.agent_outcome = {"error": str(exc)}
 
-    # Se guarda en session_state para que el resultado siga visible aunque otra
-    # pestaña dispare un rerun.
+    # Kept in session_state so the result stays visible even if another tab
+    # triggers a rerun.
     agent_outcome = st.session_state.get("agent_outcome")
     if agent_outcome and "error" in agent_outcome:
         st.error(agent_outcome["error"])
